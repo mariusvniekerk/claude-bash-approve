@@ -522,7 +522,7 @@ func main() {
 
 	db := openTelemetryDB()
 	if db != nil {
-		defer db.Close()
+		defer db.Close() //nolint:errcheck // best-effort telemetry
 	}
 
 	payload := string(rawInput)

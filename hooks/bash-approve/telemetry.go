@@ -29,7 +29,7 @@ func openTelemetryDB() *sql.DB {
 		reason   TEXT
 	)`)
 	if err != nil {
-		db.Close()
+		db.Close() //nolint:errcheck // best-effort telemetry
 		return nil
 	}
 	return db
