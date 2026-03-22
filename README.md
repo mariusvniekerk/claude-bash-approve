@@ -7,8 +7,20 @@ A Claude Code [PreToolUse hook](https://docs.anthropic.com/en/docs/claude-code/h
 When Claude Code is about to run a Bash command, this hook intercepts it and makes one of three decisions:
 
 - **approve** — command runs immediately, no prompt
+- **ask** — recognized command, but explicitly falls through to Claude Code's permission prompt (e.g. `git push`, `gh pr create`)
 - **deny** — command is blocked
-- **no opinion** — falls through to Claude Code's normal permission prompt
+- **no opinion** — unrecognized command, falls through to Claude Code's normal permission prompt
+
+```mermaid
+flowchart TD
+    A["Claude Code runs Bash command"] --> B["Parse command AST"]
+    B --> C{"All segments\nmatched?"}
+    C -- No --> D["**no opinion**\nfall through to prompt"]
+    C -- Yes --> E{"Check decision\nfor each segment"}
+    E -- "all approve" --> F["**approve**\nrun immediately"]
+    E -- "any ask" --> G["**ask**\nfall through to prompt"]
+    E -- "any deny" --> H["**deny**\nblock command"]
+```
 
 Commands are parsed into an AST (using [mvdan/sh](https://github.com/mvdan/sh)) so chained commands (`&&`, `||`, `;`, `|`), subshells, command substitutions (`$(…)`), and control flow (`if`, `for`, `while`) are all handled correctly — every segment must be safe for the whole command to be approved.
 
@@ -20,7 +32,7 @@ The hook uses a compositional model: a command is split into **wrappers** (prefi
 
 ### Prerequisites
 
-- Go 1.23+
+- Go 1.25+
 - Claude Code
 
 ### Quick install
