@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hooks/bash-approve
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: hooks/bash-approve/go.mod
+
+      - run: go test ./...
+
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          working-directory: hooks/bash-approve
