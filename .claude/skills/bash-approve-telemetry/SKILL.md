@@ -30,12 +30,14 @@ CREATE TABLE decisions (
 
 ### Decision Values
 
-| Decision | Meaning |
-|----------|---------|
-| `allow` | Auto-approved by a matching rule |
-| `ask` | Fell through to Claude Code's permission prompt (intentional gate or no matching rule) |
-| `no-opinion` | No matching pattern; hook abstained |
-| `deny` | Explicitly blocked (e.g. `go mod vendor`) |
+| Decision | Meaning | Hook output |
+|----------|---------|-------------|
+| `allow` | Auto-approved by a matching rule | Emits allow decision |
+| `deny` | Explicitly blocked with reason shown to Claude (e.g. `rm -r`, `git stash`, `go mod vendor`) | Emits deny decision |
+| `ask` | Recognized command, user is prompted to confirm — **terminal**, no further hooks run (e.g. `git tag`) | Emits ask decision |
+| `no-opinion` | No matching pattern, or matched but no decision — exits silently so the next hook in the chain can handle it (e.g. `git push`, `gh pr create`) | No output, exit 0 |
+
+Priority when merging chain/multiline decisions: **deny > ask > no-opinion > allow**.
 
 ## Quick Reference Queries
 
@@ -102,14 +104,17 @@ The best candidates for new auto-approve rules are commands that:
 
 **Source code** is at `~/code/agent-skills/hooks/bash-approve/` — edits go here, not in `~/.claude/hooks/bash-approve/` (that's the deployed copy with compiled binary).
 
-**Three decision types for new patterns:**
+**Four decision types for new patterns:**
 - `allow` (default) — auto-approve silently
-- `WithDecision("")` — ask (fall through to Claude Code's permission prompt, e.g. `git push`, `gh pr create`, `go mod init`)
-- `WithDecision("deny")` — block the command (e.g. `go mod vendor`)
+- `WithDecision("deny")` + `WithDenyReason("...")` — block the command with a reason shown to Claude (e.g. `go mod vendor`, `rm -r`, `git stash`)
+- `WithDecision("ask")` — prompt user to confirm, terminal (e.g. `git tag`)
+- `WithDecision("")` — no opinion, pass to next hook in chain (e.g. `git push`, `gh pr create`)
 
-Deny propagates through chains: if any segment is deny, the whole chain is deny. Ask propagates similarly but deny takes precedence.
+Priority in chains: **deny > ask > no-opinion > allow**. If any segment is deny, the whole chain is deny.
 
-For commands that show `ask` — these are **intentionally gated**. Only promote them to auto-approve if you're certain you want unattended execution.
+For commands that show `no-opinion` — these either have no matching pattern (candidates for new rules) or are intentionally deferred to the next hook. Check if a reason is logged to distinguish.
+
+For commands that show `ask` — these are **terminal gates**. The user will always be prompted. Do not confuse with `no-opinion` which passes to the next hook.
 
 ## Configuration File
 
@@ -127,5 +132,5 @@ Fine-grained category names match the first tag in each pattern's `tags()` call 
 ## Common Mistakes
 
 - **Timestamps are UTC** — adjust when comparing to local time.
-- **`no-opinion` vs `ask`** — `no-opinion` means no rule matched at all; `ask` means a rule matched but its decision is "" (intentional gate). New rules fix `no-opinion`; changing `categories.yaml` or pattern decisions fixes `ask`.
+- **`no-opinion` vs `ask`** — `no-opinion` means either no rule matched or a rule matched with `WithDecision("")` (deferred to next hook). `ask` means a rule matched with `WithDecision("ask")` and the user will always be prompted (terminal). New rules fix unmatched no-opinion; `ask` is intentional.
 - **Database path** — it lives next to the compiled binary, not the source. If you recompile to a different location, a new empty db is created.
