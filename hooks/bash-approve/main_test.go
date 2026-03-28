@@ -204,6 +204,8 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"true", "true", "shell builtin"},
 		{"false", "false", "shell builtin"},
 		{"exit 0", "exit 0", "shell builtin"},
+		{"wait", "wait", "shell builtin"},
+		{"seq", "seq 1 10", "read-only"},
 		{"kill pid", "kill 12345", "process mgmt"},
 		{"pkill", "pkill -f myprocess", "process mgmt"},
 		{"export", "export NEWPORT_VERSION", "shell vars"},
@@ -400,6 +402,7 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"docker compose ps", "docker compose ps", "docker compose"},
 		{"docker compose logs", "docker compose logs -f myservice", "docker compose"},
 		{"docker compose config", "docker compose config --format json", "docker compose"},
+		{"docker compose ls", "docker compose ls --all --format json", "docker compose"},
 		{"docker compose version", "docker compose version", "docker compose"},
 		{"absolute path docker", "/Users/me/.rd/bin/docker exec mycontainer ls", "absolute path+docker"},
 		{"absolute path docker compose up", "/Users/me/.rd/bin/docker compose -f docker-compose.yml up", "absolute path+docker compose"},
@@ -414,6 +417,8 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"for loop simple", "for f in *.go; do echo $f; done", "for{echo}"},
 		{"for loop multi cmd", "for id in 1 2 3; do echo \"=== $id ===\"; git status; done", "for{echo | git read op}"},
 		{"for loop with pipe", "for id in 260 261; do\n  echo \"=== JOB $id ===\"\n  roborev show --job $id --json 2>&1 | python3 -c \"import json,sys; print('ok')\"\n  echo \"\"\ndone", "for{echo | roborev show | python | echo}"},
+		{"for loop with seq and wait", "for i in $(seq 1 5); do\n  go test ./... &\ndone\nwait", "for{go} | shell builtin"},
+		{"for loop with grpcurl", "for io in 219129 220338; do\n  echo \"=== IO $io ===\"\n  grpcurl -plaintext localhost:50051 list\ndone", "for{echo | grpcurl}"},
 
 		// --- While loops ---
 		{"while loop", "while true; do sleep 1; done", "while{sleep}"},

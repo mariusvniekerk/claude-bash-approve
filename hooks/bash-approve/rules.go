@@ -109,12 +109,12 @@ var allCommandPatterns = []pattern{
 	// shell
 	NewPattern(`^rm\s+(-[a-zA-Z]*r[a-zA-Z]*|--recursive)\b`, tags("rm -r", "shell destructive", "shell"), WithDecision("deny"),
 		WithDenyReason("BLOCKED: rm -r is banned. Remove specific files only, not entire directory trees.")),
-	NewPattern(`^(ls|cat|head|tail|wc|find|grep|rg|file|which|pwd|du|df|curl|sort|uniq|cut|tr|awk|sed|xargs|xxd|od|hexdump|sqlite3|tee|diff|stat|realpath|basename|dirname|readlink|md5sum|sha256sum|shasum|lsof|ps|pgrep|jq|yq|id|whoami|hostname|uname|date|env)\b`, tags("read-only", "shell")),
+	NewPattern(`^(ls|cat|head|tail|wc|find|grep|rg|file|which|pwd|du|df|curl|sort|uniq|cut|tr|awk|sed|xargs|xxd|od|hexdump|sqlite3|tee|diff|stat|realpath|basename|dirname|readlink|md5sum|sha256sum|shasum|lsof|ps|pgrep|jq|yq|id|whoami|hostname|uname|date|env|seq)\b`, tags("read-only", "shell")),
 	NewPattern(`^touch\b`, tags("touch", "shell")),
 	NewPattern(`^mkdir\b`, tags("mkdir", "shell")),
 	NewPattern(`^cp\s+-[a-zA-Z]*n`, tags("cp -n", "shell")),
 	NewPattern(`^ln\s+-[a-eg-zA-Z]*s[a-eg-zA-Z]*\s`, tags("ln -s", "shell")),
-	NewPattern(`^(true|false|exit(\s+\d+)?)$`, tags("shell builtin", "shell")),
+	NewPattern(`^(true|false|exit(\s+\d+)?|wait)$`, tags("shell builtin", "shell")),
 	NewPattern(`^unset\b`, tags("shell vars", "shell")),
 	NewPattern(`^(pkill|kill)\b`, tags("process mgmt", "shell")),
 	NewPattern(`^eval\b`, tags("eval", "shell")),
@@ -191,7 +191,7 @@ var allCommandPatterns = []pattern{
 	NewPattern(`^process-compose\s+(process\s+(list|logs|restart|stop|start|info)|project\s+state|logs|port|--help|help)\b`, tags("process-compose")),
 
 	// docker
-	NewPattern(`^docker\s+compose\s+(-[^\s]+\s+\S+\s+)*(up|down|run|build|ps|logs|stop|start|restart|pull|config|exec|create|rm|kill|pause|unpause|top|events|port|images)\b`, tags("docker compose", "docker")),
+	NewPattern(`^docker\s+compose\s+(-[^\s]+\s+\S+\s+)*(up|down|run|build|ps|logs|stop|start|restart|pull|config|exec|create|rm|kill|pause|unpause|top|events|port|images|ls)\b`, tags("docker compose", "docker")),
 	NewPattern(`^docker\s+(exec|run|build|logs|ps|inspect|images|pull|stop|start|restart|rm|cp|stats|top|port|network|volume|info|context|--help|help|version)\b`, tags("docker")),
 	NewPattern(`^docker\s+compose\s+(-[^\s]+\s+\S+\s+)*version\b`, tags("docker compose", "docker")),
 	NewPattern(`^docker-compose\b`, tags("docker-compose", "docker")),
