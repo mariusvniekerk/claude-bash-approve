@@ -174,18 +174,7 @@ go test -v ./...
 
 ## Discovering new patterns
 
-The project includes a Claude Code skill (`bash-approve-telemetry`) that queries the telemetry database to find commands that need new rules. Use it by asking Claude to "check the telemetry for approval candidates" or invoking `/bash-approve-telemetry`.
-
-The key query finds commands with `no-opinion` — these had no matching pattern and were passed through to the next hook:
-
-```sql
-sqlite3 ~/.claude/hooks/bash-approve/telemetry.db \
-  "SELECT command, count(*) as cnt FROM decisions
-   WHERE ts >= datetime('now', '-7 days') AND decision = 'no-opinion'
-   GROUP BY command ORDER BY cnt DESC LIMIT 20;"
-```
-
-Good candidates for new rules are commands that appear frequently and are clearly safe (read-only, local, idempotent). Complex one-off scripts are usually not worth adding.
+The project includes a Claude Code skill (`.claude/skills/bash-approve-telemetry/`) that queries the telemetry database to find commands that need new rules. Ask Claude to "check the telemetry for approval candidates" or invoke `/bash-approve-telemetry`.
 
 ## Adding new commands
 
