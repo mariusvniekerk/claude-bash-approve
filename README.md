@@ -16,10 +16,10 @@ This builds the binary, creates `~/.claude/settings.json` if it doesn't exist, a
 
 When Claude Code is about to run a Bash command, this hook intercepts it and makes one of four decisions:
 
-- **allow** — command runs immediately, no prompt
 - **deny** — command is blocked (with a reason shown to Claude)
 - **ask** — recognized command, user is prompted to confirm (terminal — no further hooks run) (e.g. `git tag`)
 - **no opinion** — hook has nothing to say, exits silently so the next hook in the chain can handle it (e.g. `git push`, `gh pr create`, or unrecognized commands)
+- **allow** — command runs immediately, no prompt
 
 ```mermaid
 flowchart TD
