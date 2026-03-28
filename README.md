@@ -4,6 +4,8 @@ A Claude Code [PreToolUse hook](https://docs.anthropic.com/en/docs/claude-code/h
 
 ## Install
 
+In Claude Code:
+
 ```
 /plugin install github:mariusvniekerk/claude-bash-approve
 ```
