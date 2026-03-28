@@ -23,15 +23,17 @@ When Claude Code is about to run a Bash command, this hook intercepts it and mak
 
 ```mermaid
 flowchart TD
-    A["Parse AST"] --> C{"matched?"}
-    C -->|No| NOP["no opinion"]
-    C -->|Yes| D{"deny?"}
-    D -->|Yes| DENY["deny"]
-    D -->|No| E{"ask?"}
-    E -->|Yes| ASK["ask"]
-    E -->|No| F{"no-op?"}
+    A["Parse command AST"] --> C{"All segments\nmatched?"}
+    C -->|No| NOP["**no opinion**\nnext hook in chain"]
+    C -->|Yes| priority
+    subgraph priority["Decision priority"]
+        D{"any segment\ndenied?"} -->|Yes| DENY["**deny**\nblock command"]
+        D -->|No| E{"any segment\nask?"}
+        E -->|Yes| ASK["**ask**\nprompt user"]
+        E -->|No| F{"any segment\nno-opinion?"}
+        F -->|No| OK["**allow**\nrun immediately"]
+    end
     F -->|Yes| NOP
-    F -->|No| OK["allow"]
 ```
 
 Commands are parsed into an AST (using [mvdan/sh](https://github.com/mvdan/sh)) so chained commands (`&&`, `||`, `;`, `|`), subshells, command substitutions (`$(…)`), and control flow (`if`, `for`, `while`) are all handled correctly — every segment must be safe for the whole command to be approved.
