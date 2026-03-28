@@ -22,16 +22,16 @@ When Claude Code is about to run a Bash command, this hook intercepts it and mak
 - **no opinion** — hook has nothing to say, exits silently so the next hook in the chain can handle it (e.g. `git push`, `gh pr create`, or unrecognized commands)
 
 ```mermaid
-flowchart LR
+flowchart TD
     A["Parse AST"] --> C{"matched?"}
-    C -- Yes --> D{"deny?"}
-    D -- Yes --> DENY["deny"]
-    D -- No --> E{"ask?"}
-    E -- Yes --> ASK["ask"]
-    E -- No --> F{"no-op?"}
-    F -- No --> OK["allow"]
-    F -- Yes --> NOP["no opinion"]
-    C -- No --> NOP
+    C -->|No| NOP["no opinion"]
+    C -->|Yes| D{"deny?"}
+    D -->|Yes| DENY["deny"]
+    D -->|No| E{"ask?"}
+    E -->|Yes| ASK["ask"]
+    E -->|No| F{"no-op?"}
+    F -->|Yes| NOP
+    F -->|No| OK["allow"]
 ```
 
 Commands are parsed into an AST (using [mvdan/sh](https://github.com/mvdan/sh)) so chained commands (`&&`, `||`, `;`, `|`), subshells, command substitutions (`$(…)`), and control flow (`if`, `for`, `while`) are all handled correctly — every segment must be safe for the whole command to be approved.
