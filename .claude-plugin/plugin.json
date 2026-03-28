@@ -1,0 +1,12 @@
+{
+  "name": "bash-approve",
+  "version": "1.0.0",
+  "description": "PreToolUse hook that auto-approves safe Bash commands by parsing them into an AST and matching against configurable patterns",
+  "author": {
+    "name": "Marius van Niekerk",
+    "url": "https://github.com/mariusvniekerk"
+  },
+  "repository": "https://github.com/mariusvniekerk/claude-bash-approve",
+  "license": "MIT",
+  "keywords": ["bash", "hooks", "auto-approve", "security", "permissions"]
+}

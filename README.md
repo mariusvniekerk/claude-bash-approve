@@ -49,9 +49,21 @@ The hook uses a compositional model: a command is split into **wrappers** (prefi
 - Go 1.25+
 - Claude Code
 
+### As a plugin
+
+Install directly from GitHub:
+
+```
+/plugin install github:mariusvniekerk/claude-bash-approve
+```
+
+The hook registers automatically — no manual settings.json editing needed. The Go binary compiles on first use.
+
 ### Manual setup
 
-1. Clone this repo (or copy the `hooks/bash-approve` directory):
+If you prefer not to use the plugin system:
+
+1. Clone this repo:
 
 ```bash
 git clone https://github.com/mariusvniekerk/claude-bash-approve.git
