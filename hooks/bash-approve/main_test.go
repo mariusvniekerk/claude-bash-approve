@@ -150,6 +150,8 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"mise list", "mise list", "mise"},
 		{"mise doctor", "mise doctor", "mise"},
 		{"mise approve", "mise approve", "mise"},
+		{"mise lock", "mise lock", "mise"},
+		{"mise lock dry-run", "mise lock --dry-run", "mise"},
 
 		// --- Read-only commands ---
 		{"ls", "ls -la", "read-only"},
@@ -271,6 +273,10 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"gh pr merge", "gh pr merge 123", "gh write op"},
 		{"gh pr close", "gh pr close 123", "gh write op"},
 		{"gh pr review", "gh pr review 123 --approve", "gh write op"},
+		{"gh search code", "gh search code 'pattern' --repo owner/repo", "gh search"},
+		{"gh search repos", "gh search repos 'query'", "gh search"},
+		{"gh search issues", "gh search issues 'bug'", "gh search"},
+		{"gh repo clone", "gh repo clone owner/repo", "gh repo clone"},
 		{"gh api", "gh api repos/foo/bar/pulls", "gh api"},
 
 		// --- Go toolchain ---

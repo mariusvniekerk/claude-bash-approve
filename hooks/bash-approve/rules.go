@@ -103,7 +103,7 @@ var allCommandPatterns = []pattern{
 
 	// make / mise
 	NewPattern(`^make\b`, tags("make")),
-	NewPattern(`^mise\s+(run|exec|install|use|env|--version|which|search|activate|list|ls|doctor|trust|reshim|settings)\b`, tags("mise")),
+	NewPattern(`^mise\s+(run|exec|install|use|env|--version|which|search|activate|list|ls|doctor|trust|reshim|settings|lock)\b`, tags("mise")),
 	NewPattern(`^mise\s+approve\b`, tags("mise")),
 
 	// shell
@@ -139,6 +139,8 @@ var allCommandPatterns = []pattern{
 
 	// gh (GitHub CLI)
 	NewPattern(`^gh\s+(pr|issue|run|release|repo)\s+(view|list|diff|checks|status|comment)\b`, tags("gh read op", "gh")),
+		NewPattern(`^gh\s+search\s+(code|repos|issues|prs|commits)\b`, tags("gh search", "gh")),
+		NewPattern(`^gh\s+repo\s+clone\b`, tags("gh repo clone", "gh")),
 	NewPattern(`^gh\s+pr\s+create\b`, tags("gh pr create", "gh"), WithDecision("")),
 	NewPattern(`^gh\s+(pr\s+merge|pr\s+close|pr\s+reopen|pr\s+review|pr\s+edit)\b`, tags("gh write op", "gh")),
 	NewPattern(`^gh\s+api\b`, tags("gh api", "gh")),
