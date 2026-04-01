@@ -159,7 +159,7 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"head", "head -20 file.go", "read-only"},
 		{"tail", "tail -f log.txt", "read-only"},
 		{"wc", "wc -l *.go", "read-only"},
-		{"find", "find . -name '*.go'", "read-only"},
+		{"find", "find . -name '*.go'", "find"},
 		{"grep", "grep -r TODO src/", "read-only"},
 		{"rg", "rg 'func main' .", "read-only"},
 		{"file", "file binary", "read-only"},

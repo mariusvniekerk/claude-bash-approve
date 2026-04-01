@@ -11,8 +11,8 @@ import (
 // decision is the hook permission decision: "allow" (default) or "" (no opinion, ask user).
 // denyReason, if set, is shown to Claude when the command is denied, explaining why.
 // argsValidator is called after a regex match to refine the decision using
-// the parsed AST arguments. Return true to keep the matched decision, false
-// to downgrade to "ask" (no opinion).
+// the parsed AST arguments (including command name at [0]).
+// Return true to keep the matched decision, false to downgrade to "ask".
 type argsValidator func(args []*syntax.Word) bool
 
 type pattern struct {
@@ -126,8 +126,9 @@ var allCommandPatterns = []pattern{
 	// shell
 	NewPattern(`^rm\s+(-[a-zA-Z]*r[a-zA-Z]*|--recursive)\b`, tags("rm -r", "shell destructive", "shell"), WithDecision("deny"),
 		WithDenyReason("BLOCKED: rm -r is banned. Remove specific files only, not entire directory trees.")),
-	NewPattern(`^(ls|cat|head|tail|wc|find|grep|rg|file|which|pwd|du|df|sort|uniq|cut|tr|awk|sed|xargs|xxd|od|hexdump|sqlite3|tee|diff|stat|realpath|basename|dirname|readlink|md5sum|sha256sum|shasum|lsof|ps|pgrep|jq|yq|id|whoami|hostname|uname|date|env|seq)\b`, tags("read-only", "shell")),
+	NewPattern(`^(ls|cat|head|tail|wc|grep|rg|file|which|pwd|du|df|sort|uniq|cut|tr|awk|sed|xargs|xxd|od|hexdump|sqlite3|tee|diff|stat|realpath|basename|dirname|readlink|md5sum|sha256sum|shasum|lsof|ps|pgrep|jq|yq|id|whoami|hostname|uname|date|env|seq)\b`, tags("read-only", "shell")),
 	NewPattern(`^curl\b`, tags("curl", "shell"), WithValidator(isCurlReadOnly)),
+	NewPattern(`^find\b`, tags("find", "shell")), // validator set in init() to break cycle
 	NewPattern(`^touch\b`, tags("touch", "shell")),
 	NewPattern(`^mkdir\b`, tags("mkdir", "shell")),
 	NewPattern(`^cp\s+-[a-zA-Z]*n`, tags("cp -n", "shell")),
