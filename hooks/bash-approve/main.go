@@ -274,8 +274,17 @@ func evaluateCommand(cmd syntax.Command, wrapperPats, commandPats []pattern) *re
 		// export, declare, local, readonly, typeset
 		return approved("shell vars")
 	case *syntax.ForClause:
+		if !checkForLoop(c.Loop, wrapperPats, commandPats) {
+			return nil
+		}
 		return evaluateBlock(c.Do, wrapperPats, commandPats, "for")
 	case *syntax.WhileClause:
+		for _, stmt := range c.Cond {
+			r := evaluateStmt(stmt, wrapperPats, commandPats)
+			if r == nil {
+				return nil
+			}
+		}
 		return evaluateBlock(c.Do, wrapperPats, commandPats, "while")
 	case *syntax.IfClause:
 		return evaluateIfClause(c, wrapperPats, commandPats)
@@ -360,6 +369,28 @@ func evaluateIfClause(ic *syntax.IfClause, wrapperPats, commandPats []pattern) *
 		}
 	}
 	return r
+}
+
+// checkForLoop validates the iteration/condition of a for loop.
+// Returns false if any substitution inside the loop header is unsafe.
+func checkForLoop(loop syntax.Loop, wrapperPats, commandPats []pattern) bool {
+	switch l := loop.(type) {
+	case *syntax.WordIter:
+		for _, word := range l.Items {
+			if !checkSubstitutions(word, wrapperPats, commandPats) {
+				return false
+			}
+		}
+	case *syntax.CStyleLoop:
+		for _, expr := range []syntax.ArithmExpr{l.Init, l.Cond, l.Post} {
+			if expr != nil {
+				if !checkSubstitutions(expr, wrapperPats, commandPats) {
+					return false
+				}
+			}
+		}
+	}
+	return true
 }
 
 // evaluateBinaryCmd handles &&, ||, | chains.
