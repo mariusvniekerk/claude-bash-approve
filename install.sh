@@ -2,9 +2,11 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-HOOK_DIR="$REPO_DIR/hooks/bash-approve"
+SOURCE_HOOK_DIR="$REPO_DIR/hooks/bash-approve"
+CLAUDE_DIR="$HOME/.claude"
+HOOK_DIR="$CLAUDE_DIR/hooks/bash-approve"
 RUN_HOOK="$HOOK_DIR/run-hook.sh"
-SETTINGS_FILE="$HOME/.claude/settings.json"
+SETTINGS_FILE="$CLAUDE_DIR/settings.json"
 
 echo "==> Installing claude-bash-approve"
 
@@ -14,13 +16,22 @@ if ! command -v go &>/dev/null; then
     exit 1
 fi
 
-# Build the binary to verify everything compiles
+# Ensure ~/.claude exists
+mkdir -p "$CLAUDE_DIR"
+mkdir -p "$HOOK_DIR"
+
+echo "==> Copying hook sources to $HOOK_DIR"
+cp "$SOURCE_HOOK_DIR"/*.go "$HOOK_DIR"/
+cp "$SOURCE_HOOK_DIR"/go.mod "$HOOK_DIR"/
+cp "$SOURCE_HOOK_DIR"/go.sum "$HOOK_DIR"/
+cp "$SOURCE_HOOK_DIR"/categories.yaml "$HOOK_DIR"/
+cp "$SOURCE_HOOK_DIR"/run-hook.sh "$HOOK_DIR"/
+chmod +x "$RUN_HOOK"
+
+# Build the binary in the deployed directory to verify everything compiles
 echo "==> Building hook binary..."
 (cd "$HOOK_DIR" && go build -o "$HOOK_DIR/approve-bash" .)
 echo "    Built: $HOOK_DIR/approve-bash"
-
-# Ensure ~/.claude exists
-mkdir -p "$HOME/.claude"
 
 # Create or update settings.json with the hook
 if [ ! -f "$SETTINGS_FILE" ]; then
@@ -53,11 +64,13 @@ if [ ! -f "$SETTINGS_FILE" ]; then
 ENDJSON
     echo "    Created with bash-approve hook."
 else
-    # settings.json exists — check if hook is already configured
-    if grep -q "bash-approve" "$SETTINGS_FILE" 2>/dev/null; then
-        echo "==> Hook already present in $SETTINGS_FILE — skipping."
+    # settings.json exists — check if the expected deployed hook is already configured
+    if grep -Fq "\"command\": \"$RUN_HOOK\"" "$SETTINGS_FILE" 2>/dev/null \
+        && grep -Fq '"matcher": "Bash"' "$SETTINGS_FILE" 2>/dev/null \
+        && grep -Fq '"matcher": "Read|Grep"' "$SETTINGS_FILE" 2>/dev/null; then
+        echo "==> Hook already present in $SETTINGS_FILE — skipping settings update."
     else
-        echo "==> $SETTINGS_FILE exists but does not contain bash-approve hook."
+        echo "==> $SETTINGS_FILE exists but does not contain the deployed bash-approve hook."
         echo ""
         echo "    Add the following to your \"hooks\" config manually:"
         echo ""
@@ -119,13 +132,18 @@ ENDJSON
 }
 ENDJSON
 )
-            jq --argjson hook "$HOOK_JSON" '
+            jq --argjson bash_hook "$HOOK_JSON" --argjson read_grep_hook "$READ_GREP_HOOK_JSON" '
               .hooks //= {} |
               .hooks.PreToolUse //= [] |
-              .hooks.PreToolUse += [$hook]
-            ' "$SETTINGS_FILE.bak" | jq --argjson hook "$READ_GREP_HOOK_JSON" '
-              .hooks.PreToolUse += [$hook]
-            ' > "$SETTINGS_FILE"
+              .hooks.PreToolUse |= map(
+                if .matcher == "Bash" or .matcher == "Read|Grep" then
+                  empty
+                else
+                  .
+                end
+              ) |
+              .hooks.PreToolUse += [$bash_hook, $read_grep_hook]
+            ' "$SETTINGS_FILE.bak" > "$SETTINGS_FILE"
             echo "    Merged hook into existing settings."
         fi
     fi

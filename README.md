@@ -54,7 +54,7 @@ cd claude-bash-approve
 ./install.sh
 ```
 
-Builds the binary, creates `~/.claude/settings.json` if needed, and adds the hook. Pass `--force` to merge into an existing settings file (requires `jq`).
+Copies the hook source bundle into `~/.claude/hooks/bash-approve/`, builds the binary there, creates `~/.claude/settings.json` if needed, and adds the hook. Pass `--force` to merge into an existing settings file (requires `jq`).
 
 ### Manual setup
 
@@ -75,7 +75,7 @@ git clone https://github.com/mariusvniekerk/claude-bash-approve.git
         "hooks": [
           {
             "type": "command",
-            "command": "/path/to/claude-bash-approve/hooks/bash-approve/run-hook.sh"
+            "command": "~/.claude/hooks/bash-approve/run-hook.sh"
           }
         ]
       },
@@ -84,7 +84,7 @@ git clone https://github.com/mariusvniekerk/claude-bash-approve.git
         "hooks": [
           {
             "type": "command",
-            "command": "/path/to/claude-bash-approve/hooks/bash-approve/run-hook.sh"
+            "command": "~/.claude/hooks/bash-approve/run-hook.sh"
           }
         ]
       }
@@ -93,9 +93,17 @@ git clone https://github.com/mariusvniekerk/claude-bash-approve.git
 }
 ```
 
-Replace `/path/to/` with the actual path to your clone.
+3. Copy the runtime hook bundle into `~/.claude/hooks/bash-approve/`:
 
-3. The hook auto-compiles on first run. The `run-hook.sh` shim rebuilds the Go binary whenever source files change, so there's no manual build step.
+```bash
+mkdir -p ~/.claude/hooks/bash-approve
+cp hooks/bash-approve/*.go ~/.claude/hooks/bash-approve/
+cp hooks/bash-approve/go.mod hooks/bash-approve/go.sum ~/.claude/hooks/bash-approve/
+cp hooks/bash-approve/categories.yaml hooks/bash-approve/run-hook.sh ~/.claude/hooks/bash-approve/
+chmod +x ~/.claude/hooks/bash-approve/run-hook.sh
+```
+
+4. The hook auto-compiles on first run. The `run-hook.sh` shim rebuilds the Go binary whenever source files change, so there's no manual build step.
 
 ## Configuration
 
@@ -159,10 +167,10 @@ See `categories.yaml` for the full reference with examples.
 
 ## Telemetry
 
-Every decision is logged to a local SQLite database (`telemetry.db`, next to the binary). This lets you review what the hook approved, denied, or passed through:
+Every decision is logged to a local SQLite database (`telemetry.db`, next to the binary). With the install script deployment model, this lives at `~/.claude/hooks/bash-approve/telemetry.db`. This lets you review what the hook approved, denied, or passed through:
 
 ```bash
-sqlite3 hooks/bash-approve/telemetry.db "SELECT ts, decision, command, reason FROM decisions ORDER BY ts DESC LIMIT 20"
+sqlite3 ~/.claude/hooks/bash-approve/telemetry.db "SELECT ts, decision, command, reason FROM decisions ORDER BY ts DESC LIMIT 20"
 ```
 
 Telemetry is best-effort — if the database can't be opened or written to, the hook continues normally.

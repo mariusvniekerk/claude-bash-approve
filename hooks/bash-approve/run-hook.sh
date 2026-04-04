@@ -4,10 +4,16 @@
 #
 # Configure in ~/.claude/settings.json:
 #   "hooks": {
-#     "PreToolUse": [{
-#       "matcher": "Bash",
-#       "hooks": [{"type": "command", "command": "/path/to/hooks/run-hook.sh"}]
-#     }]
+#     "PreToolUse": [
+#       {
+#         "matcher": "Bash",
+#         "hooks": [{"type": "command", "command": "~/.claude/hooks/bash-approve/run-hook.sh"}]
+#       },
+#       {
+#         "matcher": "Read|Grep",
+#         "hooks": [{"type": "command", "command": "~/.claude/hooks/bash-approve/run-hook.sh"}]
+#       }
+#     ]
 #   }
 
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
