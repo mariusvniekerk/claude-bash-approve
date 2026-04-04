@@ -1,6 +1,6 @@
 # claude-bash-approve
 
-A Claude Code [PreToolUse hook](https://docs.anthropic.com/en/docs/claude-code/hooks) that auto-approves safe Bash commands and blocks dangerous ones. Written in Go for fast startup.
+A Claude Code [PreToolUse hook](https://code.claude.com/docs/en/hooks) that auto-approves safe Bash commands, repo-scoped `Read`/`Grep` calls, and blocks dangerous operations. Written in Go for fast startup.
 
 ## Install
 
@@ -14,7 +14,7 @@ That's it. The hook registers automatically and the Go binary compiles on first 
 
 ## How it works
 
-When Claude Code is about to run a Bash command, this hook intercepts it and makes one of four decisions:
+When Claude Code is about to run a matched tool call, this hook intercepts it and makes one of four decisions:
 
 - **deny** — command is blocked (with a reason shown to Claude)
 - **ask** — recognized command, user is prompted to confirm (terminal — no further hooks run) (e.g. `git tag`)
@@ -37,6 +37,8 @@ flowchart TD
 ```
 
 Commands are parsed into an AST (using [mvdan/sh](https://github.com/mvdan/sh)) so chained commands (`&&`, `||`, `;`, `|`), subshells, command substitutions (`$(…)`), and control flow (`if`, `for`, `while`) are all handled correctly — every segment must be safe for the whole command to be approved.
+
+For `Read` and `Grep`, the hook auto-approves only when the referenced paths stay inside the current Git repo or linked worktree root derived from the incoming `cwd`. Anything outside that boundary falls back to no-opinion.
 
 ### Wrappers + Commands
 
@@ -76,6 +78,15 @@ git clone https://github.com/mariusvniekerk/claude-bash-approve.git
             "command": "/path/to/claude-bash-approve/hooks/bash-approve/run-hook.sh"
           }
         ]
+      },
+      {
+        "matcher": "Read|Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/claude-bash-approve/hooks/bash-approve/run-hook.sh"
+          }
+        ]
       }
     ]
   }
@@ -88,7 +99,7 @@ Replace `/path/to/` with the actual path to your clone.
 
 ## Configuration
 
-Command categories are configured in `hooks/bash-approve/categories.yaml`. When this file is absent or empty, all commands are approved (with some exceptions noted below).
+Command categories are configured in `hooks/bash-approve/categories.yaml` for Bash command matching. When this file is absent or empty, all matched Bash commands are approved (with some exceptions noted below). `Read` and `Grep` are governed by repo/worktree path checks instead.
 
 ### Enabled / Disabled
 

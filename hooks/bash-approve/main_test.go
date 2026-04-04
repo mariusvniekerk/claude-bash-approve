@@ -1169,6 +1169,68 @@ func TestCDApproval_CurrentRepoWorktreesOnly(t *testing.T) {
 	})
 }
 
+func TestEvaluateToolUse_ReadAndGrepRepoScoped(t *testing.T) {
+	repo := initGitRepo(t)
+	repoFile := filepath.Join(repo, "inside.txt")
+	require.NoError(t, os.WriteFile(repoFile, []byte("inside\n"), 0644))
+	outsideFile := filepath.Join(t.TempDir(), "outside.txt")
+	require.NoError(t, os.WriteFile(outsideFile, []byte("outside\n"), 0644))
+
+	cfg := Config{Enabled: []string{"all"}}
+
+	t.Run("read inside repo is allowed", func(t *testing.T) {
+		input := HookInput{
+			ToolName:  "Read",
+			ToolInput: mustMarshalJSON(t, map[string]any{"file_path": repoFile}),
+			Cwd:       repo,
+		}
+		cmd, r := evaluateToolUse(input, cfg)
+		require.NotNil(t, r)
+		assert.Equal(t, repoFile, cmd)
+		assert.Equal(t, "read", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("read outside repo is no-opinion", func(t *testing.T) {
+		input := HookInput{
+			ToolName:  "Read",
+			ToolInput: mustMarshalJSON(t, map[string]any{"file_path": outsideFile}),
+			Cwd:       repo,
+		}
+		cmd, r := evaluateToolUse(input, cfg)
+		require.NotNil(t, r)
+		assert.Equal(t, outsideFile, cmd)
+		assert.Equal(t, "read", r.reason)
+		assert.Empty(t, r.decision)
+	})
+
+	t.Run("grep inside repo path is allowed", func(t *testing.T) {
+		input := HookInput{
+			ToolName:  "Grep",
+			ToolInput: mustMarshalJSON(t, map[string]any{"pattern": "inside", "path": repo}),
+			Cwd:       repo,
+		}
+		cmd, r := evaluateToolUse(input, cfg)
+		require.NotNil(t, r)
+		assert.Equal(t, repo, cmd)
+		assert.Equal(t, "grep", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("grep outside repo path is no-opinion", func(t *testing.T) {
+		input := HookInput{
+			ToolName:  "Grep",
+			ToolInput: mustMarshalJSON(t, map[string]any{"pattern": "outside", "path": filepath.Dir(outsideFile)}),
+			Cwd:       repo,
+		}
+		cmd, r := evaluateToolUse(input, cfg)
+		require.NotNil(t, r)
+		assert.Equal(t, filepath.Dir(outsideFile), cmd)
+		assert.Equal(t, "grep", r.reason)
+		assert.Empty(t, r.decision)
+	})
+}
+
 func writeTestConfig(t *testing.T, content string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -1285,8 +1347,10 @@ func TestHookInputDeserialization(t *testing.T) {
 			err := json.Unmarshal([]byte(tt.json), &input)
 			assert.NoError(t, err)
 			assert.Equal(t, "Bash", input.ToolName)
-			assert.Equal(t, tt.command, input.ToolInput.Command)
-			assert.Equal(t, tt.timeout, input.ToolInput.Timeout)
+			var bashInput BashInput
+			require.NoError(t, json.Unmarshal(input.ToolInput, &bashInput))
+			assert.Equal(t, tt.command, bashInput.Command)
+			assert.Equal(t, tt.timeout, bashInput.Timeout)
 		})
 	}
 }
@@ -1318,4 +1382,11 @@ func runGit(t *testing.T, dir string, args ...string) string {
 	out, err := cmd.CombinedOutput()
 	require.NoErrorf(t, err, "git %v failed: %s", args, string(out))
 	return string(out)
+}
+
+func mustMarshalJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	data, err := json.Marshal(value)
+	require.NoError(t, err)
+	return data
 }

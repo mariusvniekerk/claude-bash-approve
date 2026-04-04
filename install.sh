@@ -37,6 +37,15 @@ if [ ! -f "$SETTINGS_FILE" ]; then
             "command": "$RUN_HOOK"
           }
         ]
+      },
+      {
+        "matcher": "Read|Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$RUN_HOOK"
+          }
+        ]
       }
     ]
   }
@@ -55,6 +64,15 @@ else
         echo '    "PreToolUse": ['
         echo '      {'
         echo '        "matcher": "Bash",'
+        echo '        "hooks": ['
+        echo '          {'
+        echo '            "type": "command",'
+        echo "            \"command\": \"$RUN_HOOK\""
+        echo '          }'
+        echo '        ]'
+        echo '      },'
+        echo '      {'
+        echo '        "matcher": "Read|Grep",'
         echo '        "hooks": ['
         echo '          {'
         echo '            "type": "command",'
@@ -89,11 +107,25 @@ else
 }
 ENDJSON
 )
+            READ_GREP_HOOK_JSON=$(cat <<ENDJSON
+{
+  "matcher": "Read|Grep",
+  "hooks": [
+    {
+      "type": "command",
+      "command": "$RUN_HOOK"
+    }
+  ]
+}
+ENDJSON
+)
             jq --argjson hook "$HOOK_JSON" '
               .hooks //= {} |
               .hooks.PreToolUse //= [] |
               .hooks.PreToolUse += [$hook]
-            ' "$SETTINGS_FILE.bak" > "$SETTINGS_FILE"
+            ' "$SETTINGS_FILE.bak" | jq --argjson hook "$READ_GREP_HOOK_JSON" '
+              .hooks.PreToolUse += [$hook]
+            ' > "$SETTINGS_FILE"
             echo "    Merged hook into existing settings."
         fi
     fi

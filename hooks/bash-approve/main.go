@@ -27,9 +27,9 @@ import (
 )
 
 type HookInput struct {
-	ToolName  string    `json:"tool_name"`
-	ToolInput BashInput `json:"tool_input"`
-	Cwd       string    `json:"cwd"`
+	ToolName  string          `json:"tool_name"`
+	ToolInput json.RawMessage `json:"tool_input"`
+	Cwd       string          `json:"cwd"`
 }
 
 type BashInput struct {
@@ -37,6 +37,16 @@ type BashInput struct {
 	Description     string `json:"description"`
 	Timeout         int    `json:"timeout"`
 	RunInBackground bool   `json:"run_in_background"`
+}
+
+type ReadInput struct {
+	FilePath string `json:"file_path"`
+}
+
+type GrepInput struct {
+	Pattern string   `json:"pattern"`
+	Path    string   `json:"path"`
+	Paths   []string `json:"paths"`
 }
 
 type HookOutput struct {
@@ -606,6 +616,43 @@ func evaluate(cmd string, ctx evalContext, wrapperPats []pattern, commandPats []
 	return mergeStmtResults(file.Stmts, ctx, wrapperPats, commandPats)
 }
 
+func evaluateToolUse(input HookInput, cfg Config) (string, *result) {
+	ctx := evalContext{cwd: input.Cwd}
+
+	switch input.ToolName {
+	case "Bash":
+		var bashInput BashInput
+		if err := json.Unmarshal(input.ToolInput, &bashInput); err != nil {
+			return "", nil
+		}
+		return bashInput.Command, Evaluate(bashInput.Command, cfg, ctx)
+	case "Read":
+		var readInput ReadInput
+		if err := json.Unmarshal(input.ToolInput, &readInput); err != nil {
+			return "", nil
+		}
+		return readInput.FilePath, evaluateReadTool(readInput, ctx)
+	case "Grep":
+		var grepInput GrepInput
+		if err := json.Unmarshal(input.ToolInput, &grepInput); err != nil {
+			return "", nil
+		}
+		return grepCommandLabel(grepInput), evaluateGrepTool(grepInput, ctx)
+	default:
+		return "", nil
+	}
+}
+
+func grepCommandLabel(input GrepInput) string {
+	if input.Path != "" {
+		return input.Path
+	}
+	if len(input.Paths) > 0 {
+		return strings.Join(input.Paths, ",")
+	}
+	return input.Pattern
+}
+
 func main() {
 	rawInput, err := io.ReadAll(os.Stdin)
 	if err != nil {
@@ -617,25 +664,20 @@ func main() {
 		os.Exit(0)
 	}
 
-	if data.ToolName != "Bash" {
-		os.Exit(0)
-	}
-
 	db := openTelemetryDB()
 	if db != nil {
 		defer db.Close() //nolint:errcheck // best-effort telemetry
 	}
 
 	payload := string(rawInput)
-	cmd := data.ToolInput.Command
 
 	cfg, err := loadConfig()
 	if err != nil {
-		logDecision(db, payload, cmd, decisionDeny, err.Error())
+		logDecision(db, payload, "", decisionDeny, err.Error())
 		emitDecision(decisionDeny, err.Error())
 	}
 
-	r := Evaluate(cmd, cfg, evalContext{cwd: data.Cwd})
+	cmd, r := evaluateToolUse(data, cfg)
 	if r == nil {
 		logDecision(db, payload, cmd, "no-opinion", "")
 		os.Exit(0)
