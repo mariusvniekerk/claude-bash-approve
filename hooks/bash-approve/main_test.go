@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -13,7 +14,11 @@ import (
 
 // helper: evaluate with all patterns
 func evaluateAll(cmd string) *result {
-	return evaluate(cmd, allWrapperPatterns, allCommandPatterns)
+	return evaluate(cmd, evalContext{}, allWrapperPatterns, allCommandPatterns)
+}
+
+func evaluateAllInDir(cmd, cwd string) *result {
+	return evaluate(cmd, evalContext{cwd: cwd}, allWrapperPatterns, allCommandPatterns)
 }
 
 func TestEvaluate_Approved(t *testing.T) {
@@ -804,7 +809,7 @@ func TestEvaluateWithRestrictedConfig(t *testing.T) {
 	t.Run("git only: git diff approved", func(t *testing.T) {
 		cfg := Config{Enabled: []string{"git", "wrapper"}}
 		wrappers, commands := buildActivePatterns(cfg)
-		r := evaluate("git diff", wrappers, commands)
+		r := evaluate("git diff", evalContext{}, wrappers, commands)
 		require.NotNil(t, r, "expected git diff to be approved with git enabled")
 		assert.Equal(t, "git read op", r.reason)
 	})
@@ -812,21 +817,21 @@ func TestEvaluateWithRestrictedConfig(t *testing.T) {
 	t.Run("git only: cargo build rejected", func(t *testing.T) {
 		cfg := Config{Enabled: []string{"git", "wrapper"}}
 		wrappers, commands := buildActivePatterns(cfg)
-		r := evaluate("cargo build", wrappers, commands)
+		r := evaluate("cargo build", evalContext{}, wrappers, commands)
 		assert.Nil(t, r, "expected cargo build to be rejected with only git enabled")
 	})
 
 	t.Run("all enabled except git write: git commit rejected", func(t *testing.T) {
 		cfg := Config{Enabled: []string{"all"}, Disabled: []string{"git write op"}}
 		wrappers, commands := buildActivePatterns(cfg)
-		r := evaluate("git commit -m 'test'", wrappers, commands)
+		r := evaluate("git commit -m 'test'", evalContext{}, wrappers, commands)
 		assert.Nil(t, r, "expected git commit to be rejected when git write op disabled")
 	})
 
 	t.Run("all enabled except git write: git diff approved", func(t *testing.T) {
 		cfg := Config{Enabled: []string{"all"}, Disabled: []string{"git write op"}}
 		wrappers, commands := buildActivePatterns(cfg)
-		r := evaluate("git diff", wrappers, commands)
+		r := evaluate("git diff", evalContext{}, wrappers, commands)
 		require.NotNil(t, r, "expected git diff to be approved")
 		assert.Equal(t, "git read op", r.reason)
 	})
@@ -834,7 +839,7 @@ func TestEvaluateWithRestrictedConfig(t *testing.T) {
 	t.Run("chain with mixed config", func(t *testing.T) {
 		cfg := Config{Enabled: []string{"git", "shell", "wrapper"}}
 		wrappers, commands := buildActivePatterns(cfg)
-		r := evaluate("git diff && ls", wrappers, commands)
+		r := evaluate("git diff && ls", evalContext{}, wrappers, commands)
 		require.NotNil(t, r, "expected chain to be approved")
 		assert.Equal(t, "git read op | read-only", r.reason)
 	})
@@ -842,7 +847,7 @@ func TestEvaluateWithRestrictedConfig(t *testing.T) {
 	t.Run("chain rejected when one segment disabled", func(t *testing.T) {
 		cfg := Config{Enabled: []string{"git"}}
 		_, commands := buildActivePatterns(cfg)
-		r := evaluate("git diff && cargo build", nil, commands)
+		r := evaluate("git diff && cargo build", evalContext{}, nil, commands)
 		assert.Nil(t, r, "expected chain to be rejected when cargo not enabled")
 	})
 }
@@ -1126,6 +1131,44 @@ func TestNoOpinionDecision(t *testing.T) {
 
 }
 
+func TestCDApproval_CurrentRepoWorktreesOnly(t *testing.T) {
+	repo := initGitRepo(t)
+	linkedWorktree := filepath.Join(t.TempDir(), "feature-worktree")
+	runGit(t, repo, "worktree", "add", "-b", "feature", linkedWorktree, "HEAD")
+
+	t.Run("linked worktree from same repo is approved", func(t *testing.T) {
+		r := evaluateAllInDir("cd "+linkedWorktree, repo)
+		require.NotNil(t, r)
+		assert.Equal(t, "cd", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("relative path to linked worktree is approved", func(t *testing.T) {
+		relativePath, err := filepath.Rel(repo, linkedWorktree)
+		require.NoError(t, err)
+		r := evaluateAllInDir("cd "+relativePath, repo)
+		require.NotNil(t, r)
+		assert.Equal(t, "cd", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("unrelated directory is no-opinion", func(t *testing.T) {
+		otherDir := t.TempDir()
+		r := evaluateAllInDir("cd "+otherDir, repo)
+		require.NotNil(t, r)
+		assert.Equal(t, "cd", r.reason)
+		assert.Empty(t, r.decision)
+	})
+
+	t.Run("non repo cwd is no-opinion", func(t *testing.T) {
+		nonRepo := t.TempDir()
+		r := evaluateAllInDir("cd "+linkedWorktree, nonRepo)
+		require.NotNil(t, r)
+		assert.Equal(t, "cd", r.reason)
+		assert.Empty(t, r.decision)
+	})
+}
+
 func writeTestConfig(t *testing.T, content string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -1254,4 +1297,25 @@ func reasonOrEmpty(r *result) string {
 		return ""
 	}
 	return r.reason
+}
+
+func initGitRepo(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	runGit(t, repo, "config", "user.name", "Test User")
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("test\n"), 0644))
+	runGit(t, repo, "add", "README.md")
+	runGit(t, repo, "commit", "-m", "init")
+	return repo
+}
+
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	require.NoErrorf(t, err, "git %v failed: %s", args, string(out))
+	return string(out)
 }

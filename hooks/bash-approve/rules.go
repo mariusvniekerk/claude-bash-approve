@@ -11,16 +11,17 @@ import (
 // decision is the hook permission decision: "allow" (default) or "" (no opinion, ask user).
 // denyReason, if set, is shown to Claude when the command is denied, explaining why.
 // argsValidator is called after a regex match to refine the decision using
-// the parsed AST arguments (including command name at [0]).
-// Return true to keep the matched decision, false to downgrade to "ask".
-type argsValidator func(args []*syntax.Word) bool
+// the parsed AST arguments (including command name at [0]). Return true to
+// keep the matched decision, false to downgrade to no opinion.
+type argsValidator func(args []*syntax.Word, ctx evalContext) bool
 
 type pattern struct {
-	re         *regexp.Regexp
-	tags       []string
-	decision   string
-	denyReason string
-	validate   argsValidator
+	re               *regexp.Regexp
+	tags             []string
+	decision         string
+	denyReason       string
+	validate         argsValidator
+	validateFallback string
 }
 
 // label returns the first tag, used in approval reason strings.
@@ -49,10 +50,22 @@ func WithValidator(v argsValidator) patternOption {
 	}
 }
 
+// WithValidatorFallback changes the decision used when a validator rejects.
+func WithValidatorFallback(decision string) patternOption {
+	return func(p *pattern) {
+		p.validateFallback = decision
+	}
+}
+
 func tags(t ...string) []string { return t }
 
 func NewPattern(re string, t []string, opts ...patternOption) pattern {
-	p := pattern{re: regexp.MustCompile(re), tags: t, decision: decisionAllow}
+	p := pattern{
+		re:               regexp.MustCompile(re),
+		tags:             t,
+		decision:         decisionAllow,
+		validateFallback: decisionAsk,
+	}
 	for _, opt := range opts {
 		opt(&p)
 	}
@@ -129,7 +142,7 @@ var allCommandPatterns = []pattern{
 	NewPattern(`^(ls|cat|head|tail|wc|grep|rg|file|which|pwd|du|df|sort|uniq|cut|tr|awk|sed|xxd|od|hexdump|sqlite3|tee|diff|stat|realpath|basename|dirname|readlink|md5sum|sha256sum|shasum|lsof|ps|pgrep|jq|yq|id|whoami|hostname|uname|date|env|seq)\b`, tags("read-only", "shell")),
 	NewPattern(`^curl\b`, tags("curl", "shell"), WithValidator(isCurlReadOnly)),
 	NewPattern(`^xargs\b`, tags("xargs", "shell")), // validator set in init() to break cycle
-	NewPattern(`^find\b`, tags("find", "shell")), // validator set in init() to break cycle
+	NewPattern(`^find\b`, tags("find", "shell")),   // validator set in init() to break cycle
 	NewPattern(`^touch\b`, tags("touch", "shell")),
 	NewPattern(`^mkdir\b`, tags("mkdir", "shell")),
 	NewPattern(`^cp\s+-[a-zA-Z]*n`, tags("cp -n", "shell")),
@@ -139,7 +152,7 @@ var allCommandPatterns = []pattern{
 	NewPattern(`^(pkill|kill)\b`, tags("process mgmt", "shell")),
 	NewPattern(`^eval\b`, tags("eval", "shell")),
 	NewPattern(`^(echo|printf)\b`, tags("echo", "shell")),
-	NewPattern(`^cd\s`, tags("cd", "shell")),
+	NewPattern(`^cd\s`, tags("cd", "shell"), WithValidator(isCurrentRepoWorktreeCD), WithValidatorFallback("")),
 	NewPattern(`^(source|\.) `, tags("source", "shell")),
 	NewPattern(`^sleep\s`, tags("sleep", "shell")),
 	NewPattern(`^[A-Z_][A-Z0-9_]*=\S*$`, tags("var assignment", "shell")),
@@ -159,8 +172,8 @@ var allCommandPatterns = []pattern{
 
 	// gh (GitHub CLI)
 	NewPattern(`^gh\s+(pr|issue|run|release|repo)\s+(view|list|diff|checks|status|comment)\b`, tags("gh read op", "gh")),
-		NewPattern(`^gh\s+search\s+(code|repos|issues|prs|commits)\b`, tags("gh search", "gh")),
-		NewPattern(`^gh\s+repo\s+clone\b`, tags("gh repo clone", "gh")),
+	NewPattern(`^gh\s+search\s+(code|repos|issues|prs|commits)\b`, tags("gh search", "gh")),
+	NewPattern(`^gh\s+repo\s+clone\b`, tags("gh repo clone", "gh")),
 	NewPattern(`^gh\s+pr\s+create\b`, tags("gh pr create", "gh"), WithDecision("")),
 	NewPattern(`^gh\s+(pr\s+merge|pr\s+close|pr\s+reopen|pr\s+review|pr\s+edit)\b`, tags("gh write op", "gh")),
 	NewPattern(`^gh\s+api\b`, tags("gh api", "gh")),

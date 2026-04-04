@@ -29,6 +29,7 @@ import (
 type HookInput struct {
 	ToolName  string    `json:"tool_name"`
 	ToolInput BashInput `json:"tool_input"`
+	Cwd       string    `json:"cwd"`
 }
 
 type BashInput struct {
@@ -63,6 +64,10 @@ type result struct {
 	reason     string
 	decision   string
 	denyReason string // human-readable explanation shown to Claude on deny
+}
+
+type evalContext struct {
+	cwd string
 }
 
 func approved(reason string) *result { return &result{reason: reason, decision: decisionAllow} }
@@ -212,7 +217,7 @@ func matchCommand(cmd string, commandPats []pattern) *pattern {
 // checkSubstitutions walks an AST node for CmdSubst and ProcSubst,
 // recursively evaluating each inner command. Returns false if any inner
 // command is unsafe.
-func checkSubstitutions(node syntax.Node, wrapperPats, commandPats []pattern) bool {
+func checkSubstitutions(node syntax.Node, ctx evalContext, wrapperPats, commandPats []pattern) bool {
 	safe := true
 	syntax.Walk(node, func(n syntax.Node) bool {
 		if !safe {
@@ -227,7 +232,7 @@ func checkSubstitutions(node syntax.Node, wrapperPats, commandPats []pattern) bo
 		}
 		if stmts != nil {
 			for _, stmt := range stmts {
-				r := evaluateStmt(stmt, wrapperPats, commandPats)
+				r := evaluateStmt(stmt, ctx, wrapperPats, commandPats)
 				if r == nil || r.decision == decisionDeny {
 					safe = false
 					return false
@@ -242,15 +247,15 @@ func checkSubstitutions(node syntax.Node, wrapperPats, commandPats []pattern) bo
 
 // evaluateStmt evaluates a single statement from the AST.
 // Returns nil if rejected.
-func evaluateStmt(stmt *syntax.Stmt, wrapperPats, commandPats []pattern) *result {
+func evaluateStmt(stmt *syntax.Stmt, ctx evalContext, wrapperPats, commandPats []pattern) *result {
 	for _, redir := range stmt.Redirs {
 		if redir.Word != nil {
-			if !checkSubstitutions(redir.Word, wrapperPats, commandPats) {
+			if !checkSubstitutions(redir.Word, ctx, wrapperPats, commandPats) {
 				return nil
 			}
 		}
 		if redir.Hdoc != nil {
-			if !checkSubstitutions(redir.Hdoc, wrapperPats, commandPats) {
+			if !checkSubstitutions(redir.Hdoc, ctx, wrapperPats, commandPats) {
 				return nil
 			}
 		}
@@ -260,36 +265,36 @@ func evaluateStmt(stmt *syntax.Stmt, wrapperPats, commandPats []pattern) *result
 		return nil
 	}
 
-	return evaluateCommand(stmt.Cmd, wrapperPats, commandPats)
+	return evaluateCommand(stmt.Cmd, ctx, wrapperPats, commandPats)
 }
 
 // evaluateCommand dispatches to the appropriate handler based on AST node type.
-func evaluateCommand(cmd syntax.Command, wrapperPats, commandPats []pattern) *result {
+func evaluateCommand(cmd syntax.Command, ctx evalContext, wrapperPats, commandPats []pattern) *result {
 	switch c := cmd.(type) {
 	case *syntax.BinaryCmd:
-		return evaluateBinaryCmd(c, wrapperPats, commandPats)
+		return evaluateBinaryCmd(c, ctx, wrapperPats, commandPats)
 	case *syntax.CallExpr:
-		return evaluateCallExpr(c, wrapperPats, commandPats)
+		return evaluateCallExpr(c, ctx, wrapperPats, commandPats)
 	case *syntax.DeclClause:
 		// export, declare, local, readonly, typeset
 		return approved("shell vars")
 	case *syntax.ForClause:
-		if !checkForLoop(c.Loop, wrapperPats, commandPats) {
+		if !checkForLoop(c.Loop, ctx, wrapperPats, commandPats) {
 			return nil
 		}
-		return evaluateBlock(c.Do, wrapperPats, commandPats, "for")
+		return evaluateBlock(c.Do, ctx, wrapperPats, commandPats, "for")
 	case *syntax.WhileClause:
 		for _, stmt := range c.Cond {
-			r := evaluateStmt(stmt, wrapperPats, commandPats)
+			r := evaluateStmt(stmt, ctx, wrapperPats, commandPats)
 			if r == nil {
 				return nil
 			}
 		}
-		return evaluateBlock(c.Do, wrapperPats, commandPats, "while")
+		return evaluateBlock(c.Do, ctx, wrapperPats, commandPats, "while")
 	case *syntax.IfClause:
-		return evaluateIfClause(c, wrapperPats, commandPats)
+		return evaluateIfClause(c, ctx, wrapperPats, commandPats)
 	case *syntax.Subshell:
-		return evaluateBlock(c.Stmts, wrapperPats, commandPats, "subshell")
+		return evaluateBlock(c.Stmts, ctx, wrapperPats, commandPats, "subshell")
 	default:
 		// Reject func declarations, etc.
 		return nil
@@ -298,14 +303,14 @@ func evaluateCommand(cmd syntax.Command, wrapperPats, commandPats []pattern) *re
 
 // mergeStmtResults evaluates all statements and merges their results.
 // Returns nil if any statement is rejected.
-func mergeStmtResults(stmts []*syntax.Stmt, wrapperPats, commandPats []pattern) *result {
+func mergeStmtResults(stmts []*syntax.Stmt, ctx evalContext, wrapperPats, commandPats []pattern) *result {
 	var reasons []string
 	var firstDenyReason string
 	askDecision := false
 	denyDecision := false
 	noOpinion := false
 	for _, stmt := range stmts {
-		r := evaluateStmt(stmt, wrapperPats, commandPats)
+		r := evaluateStmt(stmt, ctx, wrapperPats, commandPats)
 		if r == nil {
 			return nil
 		}
@@ -338,8 +343,8 @@ func mergeStmtResults(stmts []*syntax.Stmt, wrapperPats, commandPats []pattern) 
 }
 
 // evaluateBlock checks that all statements in a block (for body, while body, subshell) are safe.
-func evaluateBlock(stmts []*syntax.Stmt, wrapperPats, commandPats []pattern, label string) *result {
-	r := mergeStmtResults(stmts, wrapperPats, commandPats)
+func evaluateBlock(stmts []*syntax.Stmt, ctx evalContext, wrapperPats, commandPats []pattern, label string) *result {
+	r := mergeStmtResults(stmts, ctx, wrapperPats, commandPats)
 	if r == nil {
 		return nil
 	}
@@ -348,22 +353,22 @@ func evaluateBlock(stmts []*syntax.Stmt, wrapperPats, commandPats []pattern, lab
 }
 
 // evaluateIfClause checks all branches of an if/elif/else.
-func evaluateIfClause(ic *syntax.IfClause, wrapperPats, commandPats []pattern) *result {
+func evaluateIfClause(ic *syntax.IfClause, ctx evalContext, wrapperPats, commandPats []pattern) *result {
 	// Check condition statements
 	for _, stmt := range ic.Cond {
-		r := evaluateStmt(stmt, wrapperPats, commandPats)
+		r := evaluateStmt(stmt, ctx, wrapperPats, commandPats)
 		if r == nil {
 			return nil
 		}
 	}
 	// Check then body
-	r := evaluateBlock(ic.Then, wrapperPats, commandPats, "if")
+	r := evaluateBlock(ic.Then, ctx, wrapperPats, commandPats, "if")
 	if r == nil {
 		return nil
 	}
 	// Check else/elif
 	if ic.Else != nil {
-		elseR := evaluateCommand(ic.Else, wrapperPats, commandPats)
+		elseR := evaluateCommand(ic.Else, ctx, wrapperPats, commandPats)
 		if elseR == nil {
 			return nil
 		}
@@ -373,18 +378,18 @@ func evaluateIfClause(ic *syntax.IfClause, wrapperPats, commandPats []pattern) *
 
 // checkForLoop validates the iteration/condition of a for loop.
 // Returns false if any substitution inside the loop header is unsafe.
-func checkForLoop(loop syntax.Loop, wrapperPats, commandPats []pattern) bool {
+func checkForLoop(loop syntax.Loop, ctx evalContext, wrapperPats, commandPats []pattern) bool {
 	switch l := loop.(type) {
 	case *syntax.WordIter:
 		for _, word := range l.Items {
-			if !checkSubstitutions(word, wrapperPats, commandPats) {
+			if !checkSubstitutions(word, ctx, wrapperPats, commandPats) {
 				return false
 			}
 		}
 	case *syntax.CStyleLoop:
 		for _, expr := range []syntax.ArithmExpr{l.Init, l.Cond, l.Post} {
 			if expr != nil {
-				if !checkSubstitutions(expr, wrapperPats, commandPats) {
+				if !checkSubstitutions(expr, ctx, wrapperPats, commandPats) {
 					return false
 				}
 			}
@@ -394,12 +399,12 @@ func checkForLoop(loop syntax.Loop, wrapperPats, commandPats []pattern) bool {
 }
 
 // evaluateBinaryCmd handles &&, ||, | chains.
-func evaluateBinaryCmd(bc *syntax.BinaryCmd, wrapperPats, commandPats []pattern) *result {
-	left := evaluateStmt(bc.X, wrapperPats, commandPats)
+func evaluateBinaryCmd(bc *syntax.BinaryCmd, ctx evalContext, wrapperPats, commandPats []pattern) *result {
+	left := evaluateStmt(bc.X, ctx, wrapperPats, commandPats)
 	if left == nil {
 		return nil
 	}
-	right := evaluateStmt(bc.Y, wrapperPats, commandPats)
+	right := evaluateStmt(bc.Y, ctx, wrapperPats, commandPats)
 	if right == nil {
 		return nil
 	}
@@ -421,10 +426,10 @@ func evaluateBinaryCmd(bc *syntax.BinaryCmd, wrapperPats, commandPats []pattern)
 }
 
 // evaluateCallExpr handles simple commands (the most common case).
-func evaluateCallExpr(call *syntax.CallExpr, wrapperPats, commandPats []pattern) *result {
+func evaluateCallExpr(call *syntax.CallExpr, ctx evalContext, wrapperPats, commandPats []pattern) *result {
 	// Standalone variable assignment: FOO=bar (no command)
 	if len(call.Args) == 0 && len(call.Assigns) > 0 {
-		if !checkSubstitutions(call, wrapperPats, commandPats) {
+		if !checkSubstitutions(call, ctx, wrapperPats, commandPats) {
 			return nil
 		}
 		return approved("var assignment")
@@ -444,33 +449,33 @@ func evaluateCallExpr(call *syntax.CallExpr, wrapperPats, commandPats []pattern)
 		if knownSafe {
 			// $(which X) / $(command -v X) — inherently safe, only check remaining args
 			for _, arg := range call.Args[1:] {
-				if !checkSubstitutions(arg, wrapperPats, commandPats) {
+				if !checkSubstitutions(arg, ctx, wrapperPats, commandPats) {
 					return nil
 				}
 			}
 		} else {
 			// $(...)/path/to/cmd — must verify the inner substitution is safe too
 			for _, arg := range call.Args {
-				if !checkSubstitutions(arg, wrapperPats, commandPats) {
+				if !checkSubstitutions(arg, ctx, wrapperPats, commandPats) {
 					return nil
 				}
 			}
 		}
-		return matchAndBuild(resolved, call.Args[1:], call.Assigns, call.Args, wrapperPats, commandPats)
+		return matchAndBuild(resolved, call.Args[1:], call.Assigns, call.Args, ctx, wrapperPats, commandPats)
 	}
 
 	// Normal path: check all substitutions
-	if !checkSubstitutions(call, wrapperPats, commandPats) {
+	if !checkSubstitutions(call, ctx, wrapperPats, commandPats) {
 		return nil
 	}
 
-	return matchAndBuild(argsText(call.Args), nil, call.Assigns, call.Args, wrapperPats, commandPats)
+	return matchAndBuild(argsText(call.Args), nil, call.Assigns, call.Args, ctx, wrapperPats, commandPats)
 }
 
 // matchAndBuild strips wrappers, matches the command, and builds the result.
 // cmdText is the primary command text. extraArgs are appended if non-nil.
 // astArgs are the raw AST arguments passed to pattern validators.
-func matchAndBuild(cmdText string, extraArgs []*syntax.Word, assigns []*syntax.Assign, astArgs []*syntax.Word, wrapperPats, commandPats []pattern) *result {
+func matchAndBuild(cmdText string, extraArgs []*syntax.Word, assigns []*syntax.Assign, astArgs []*syntax.Word, ctx evalContext, wrapperPats, commandPats []pattern) *result {
 	if len(extraArgs) > 0 {
 		cmdText += " " + argsText(extraArgs)
 	}
@@ -480,8 +485,8 @@ func matchAndBuild(cmdText string, extraArgs []*syntax.Word, assigns []*syntax.A
 		return nil
 	}
 	// Run post-match validator if present; false downgrades to "ask".
-	if matched.validate != nil && !matched.validate(astArgs) {
-		return &result{reason: matched.label(), decision: decisionAsk}
+	if matched.validate != nil && !matched.validate(astArgs, ctx) {
+		return &result{reason: matched.label(), decision: matched.validateFallback}
 	}
 	if len(assigns) > 0 && !slices.Contains(wrappers, tagEnvVars) {
 		wrappers = append([]string{tagEnvVars}, wrappers...)
@@ -576,16 +581,15 @@ func resolveWhichOrCommandV(part syntax.WordPart) string {
 	}
 }
 
-
 // Evaluate checks whether a command should be approved given a config.
 // Returns nil if rejected, or a *result with the approval reason.
-func Evaluate(cmd string, cfg Config) *result {
+func Evaluate(cmd string, cfg Config, ctx evalContext) *result {
 	wrappers, commands := buildActivePatterns(cfg)
-	return evaluate(cmd, wrappers, commands)
+	return evaluate(cmd, ctx, wrappers, commands)
 }
 
 // evaluate checks whether a command should be approved against pre-built pattern lists.
-func evaluate(cmd string, wrapperPats []pattern, commandPats []pattern) *result {
+func evaluate(cmd string, ctx evalContext, wrapperPats []pattern, commandPats []pattern) *result {
 	if cmd == "" {
 		return nil
 	}
@@ -599,7 +603,7 @@ func evaluate(cmd string, wrapperPats []pattern, commandPats []pattern) *result 
 		return nil
 	}
 
-	return mergeStmtResults(file.Stmts, wrapperPats, commandPats)
+	return mergeStmtResults(file.Stmts, ctx, wrapperPats, commandPats)
 }
 
 func main() {
@@ -631,7 +635,7 @@ func main() {
 		emitDecision(decisionDeny, err.Error())
 	}
 
-	r := Evaluate(cmd, cfg)
+	r := Evaluate(cmd, cfg, evalContext{cwd: data.Cwd})
 	if r == nil {
 		logDecision(db, payload, cmd, "no-opinion", "")
 		os.Exit(0)

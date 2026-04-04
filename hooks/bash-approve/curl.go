@@ -124,7 +124,7 @@ var curlReadOnlyFlags = map[string]bool{
 // isCurlReadOnly returns true only if every flag in the curl invocation is
 // provably read-only. Unknown or non-literal flags fall back to "ask".
 // args includes the command name at args[0]; flags start at args[1].
-func isCurlReadOnly(args []*syntax.Word) bool {
+func isCurlReadOnly(args []*syntax.Word, _ evalContext) bool {
 	if len(args) < 2 {
 		return true
 	}

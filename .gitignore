@@ -42,6 +42,7 @@ venv.bak/
 .DS_Store
 .AppleDouble
 .LSOverride
+Library/
 
 # Thumbnails
 ._*
@@ -82,3 +83,4 @@ Temporary Items
 
 # Cache
 .cache/
+go/
