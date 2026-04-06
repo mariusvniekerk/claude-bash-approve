@@ -35,7 +35,7 @@ var xargsBoolFlags = map[string]bool{
 // isXargsSafe validates an xargs invocation by extracting the command
 // that xargs will run and evaluating it through the normal pipeline.
 // args includes the command name at args[0].
-func isXargsSafe(args []*syntax.Word) bool {
+func isXargsSafe(args []*syntax.Word, ctx evalContext) bool {
 	if len(args) < 2 {
 		return true // bare xargs with no args — reads stdin, echo by default
 	}
@@ -87,7 +87,7 @@ func isXargsSafe(args []*syntax.Word) bool {
 	}
 
 	cmd := strings.Join(cmdParts, " ")
-	r := evaluate(cmd, allWrapperPatterns, allCommandPatterns)
+	r := evaluate(cmd, ctx, allWrapperPatterns, allCommandPatterns)
 	if r == nil {
 		return false
 	}

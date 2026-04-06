@@ -34,7 +34,7 @@ func init() {
 // through the normal evaluation pipeline. Returns false (ask) if any embedded
 // command is unrecognized or if -delete is present.
 // args includes the command name at args[0].
-func isFindSafe(args []*syntax.Word) bool {
+func isFindSafe(args []*syntax.Word, ctx evalContext) bool {
 	if len(args) < 2 {
 		return true
 	}
@@ -77,7 +77,7 @@ func isFindSafe(args []*syntax.Word) bool {
 
 		// Evaluate the embedded command through the normal pipeline.
 		cmd := strings.Join(cmdParts, " ")
-		r := evaluate(cmd, allWrapperPatterns, allCommandPatterns)
+		r := evaluate(cmd, ctx, allWrapperPatterns, allCommandPatterns)
 		if r == nil {
 			return false // unknown command
 		}
