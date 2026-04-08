@@ -49,6 +49,17 @@ type GrepInput struct {
 	Paths   []string `json:"paths"`
 }
 
+type OpenCodeInput struct {
+	Tool    string `json:"tool"`
+	Command string `json:"command"`
+	Cwd     string `json:"cwd"`
+}
+
+type OpenCodeOutput struct {
+	Decision string `json:"decision"`
+	Reason   string `json:"reason,omitempty"`
+}
+
 type HookOutput struct {
 	HookSpecificOutput HookDecision `json:"hookSpecificOutput"`
 }
@@ -181,6 +192,12 @@ func emitDecision(decision, reason string) {
 			PermissionDecisionReason: reason,
 		},
 	}
+	b, _ := json.Marshal(out)
+	fmt.Println(string(b))
+	os.Exit(0)
+}
+
+func emitOpenCodeOutput(out OpenCodeOutput) {
 	b, _ := json.Marshal(out)
 	fmt.Println(string(b))
 	os.Exit(0)
@@ -643,6 +660,27 @@ func evaluateToolUse(input HookInput, cfg Config) (string, *result) {
 	}
 }
 
+func evaluateOpenCodeToolUse(input OpenCodeInput, cfg Config) (string, *result) {
+	if input.Tool != "bash" {
+		return "", nil
+	}
+	return input.Command, Evaluate(input.Command, cfg, evalContext{cwd: input.Cwd})
+}
+
+func buildOpenCodeOutput(r *result) OpenCodeOutput {
+	if r == nil {
+		return OpenCodeOutput{Decision: "noop"}
+	}
+	if r.decision == "" {
+		return OpenCodeOutput{Decision: "noop", Reason: r.reason}
+	}
+	reason := r.reason
+	if r.decision == decisionDeny && r.denyReason != "" {
+		reason = r.denyReason
+	}
+	return OpenCodeOutput{Decision: r.decision, Reason: reason}
+}
+
 func grepCommandLabel(input GrepInput) string {
 	if input.Path != "" {
 		return input.Path
@@ -651,6 +689,10 @@ func grepCommandLabel(input GrepInput) string {
 		return strings.Join(input.Paths, ",")
 	}
 	return input.Pattern
+}
+
+func isOpenCodeMode() bool {
+	return len(os.Args) > 1 && os.Args[1] == "--opencode"
 }
 
 func main() {
@@ -674,7 +716,23 @@ func main() {
 	cfg, err := loadConfig()
 	if err != nil {
 		logDecision(db, payload, "", decisionDeny, err.Error())
+		if isOpenCodeMode() {
+			emitOpenCodeOutput(OpenCodeOutput{Decision: decisionDeny, Reason: err.Error()})
+		}
 		emitDecision(decisionDeny, err.Error())
+	}
+
+	if isOpenCodeMode() {
+		var data OpenCodeInput
+		if err := json.Unmarshal(rawInput, &data); err != nil {
+			logDecision(db, payload, "", "noop", "")
+			emitOpenCodeOutput(OpenCodeOutput{Decision: "noop"})
+		}
+
+		cmd, r := evaluateOpenCodeToolUse(data, cfg)
+		out := buildOpenCodeOutput(r)
+		logDecision(db, payload, cmd, out.Decision, out.Reason)
+		emitOpenCodeOutput(out)
 	}
 
 	cmd, r := evaluateToolUse(data, cfg)

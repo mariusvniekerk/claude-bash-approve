@@ -1,8 +1,34 @@
 # claude-bash-approve
 
-A Claude Code [PreToolUse hook](https://code.claude.com/docs/en/hooks) that auto-approves safe Bash commands, repo-scoped `Read`/`Grep` calls, and blocks dangerous operations. Written in Go for fast startup.
+A command approval runtime for Claude Code and OpenCode. It auto-approves safe Bash commands, repo-scoped `Read`/`Grep` calls for Claude Code, and blocks dangerous operations. Written in Go for fast startup.
 
 ## Install
+
+### OpenCode
+
+The first OpenCode integration targets `bash` approvals.
+
+Project-local install:
+
+```bash
+./install-opencode.sh --project
+```
+
+Global install:
+
+```bash
+./install-opencode.sh --global
+```
+
+Install both:
+
+```bash
+./install-opencode.sh --both
+```
+
+The installer writes the OpenCode plugin, installs the runtime for global mode, and ensures OpenCode is configured to route `bash` permissions through `ask`. If `opencode.json` already exists, pass `--force` to merge the permission setting automatically with `jq`.
+
+### Claude Code
 
 In Claude Code:
 
@@ -55,6 +81,16 @@ cd claude-bash-approve
 ```
 
 Copies the hook source bundle into `~/.claude/hooks/bash-approve/`, builds the binary there, creates `~/.claude/settings.json` if needed, and adds the hook. Pass `--force` to merge into an existing settings file (requires `jq`).
+
+### OpenCode installer
+
+`install-opencode.sh` supports both OpenCode layouts:
+
+- `--project`: installs `.opencode/plugins/bash-approve.js` in this repo and configures `./opencode.json`
+- `--global`: installs `~/.config/opencode/plugins/bash-approve.js`, copies the Go runtime into `~/.config/opencode/bash-approve/`, and configures `~/.config/opencode/opencode.json`
+- `--both`: installs both layouts
+
+OpenCode needs `permission.bash` set to `ask` so the plugin can turn safe commands into `allow`, dangerous commands into `deny`, and everything else back into the normal OpenCode approval prompt.
 
 ### Manual setup
 
@@ -191,6 +227,20 @@ Output is a JSON object with the decision:
 ```
 
 No output (exit 0) means the hook has no opinion.
+
+For the OpenCode adapter mode:
+
+```bash
+echo '{"tool":"bash","command":"git status","cwd":"'$PWD'"}' | go run ./hooks/bash-approve --opencode
+```
+
+Example output:
+
+```json
+{"decision":"allow","reason":"git read op"}
+```
+
+`noop` means the adapter is deferring back to OpenCode's normal `ask` flow.
 
 ## Running tests
 
