@@ -1,0 +1,12 @@
+{
+  "name": "opencode-tester",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@opencode-ai/sdk": "^1.4.0"
+  },
+  "scripts": {
+    "test": "bun test",
+    "run": "bun run src/index.ts"
+  }
+}
