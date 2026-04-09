@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 SOURCE_HOOK_DIR="$REPO_DIR/hooks/bash-approve"
-PLUGIN_TEMPLATE="$REPO_DIR/opencode/bash-approve.plugin.js.tmpl"
+PLUGIN_TEMPLATE="$REPO_DIR/opencode/bash-approve.plugin.ts"
 PROJECT_ROOT="$REPO_DIR"
 GLOBAL_DIR="$HOME/.config/opencode"
 
@@ -98,7 +98,7 @@ EOF
 }
 
 install_project() {
-    local plugin_path="$PROJECT_ROOT/.opencode/plugins/bash-approve.js"
+    local plugin_path="$PROJECT_ROOT/.opencode/plugins/bash-approve.ts"
     local config_file="$PROJECT_ROOT/opencode.json"
     local hook_path="$SOURCE_HOOK_DIR/run-opencode-hook.sh"
 
@@ -110,7 +110,7 @@ install_project() {
 
 install_global() {
     local runtime_dir="$GLOBAL_DIR/bash-approve"
-    local plugin_path="$GLOBAL_DIR/plugins/bash-approve.js"
+    local plugin_path="$GLOBAL_DIR/plugins/bash-approve.ts"
     local config_file="$GLOBAL_DIR/opencode.json"
     local hook_path="$runtime_dir/run-opencode-hook.sh"
 

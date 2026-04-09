@@ -86,8 +86,12 @@ Copies the hook source bundle into `~/.claude/hooks/bash-approve/`, builds the b
 
 `install-opencode.sh` supports both OpenCode layouts:
 
-- `--project`: installs `.opencode/plugins/bash-approve.js` in this repo and configures `./opencode.json`
-- `--global`: installs `~/.config/opencode/plugins/bash-approve.js`, copies the Go runtime into `~/.config/opencode/bash-approve/`, and configures `~/.config/opencode/opencode.json`
+- `--project`: installs `.opencode/plugins/bash-approve.ts` in this repo and configures `./opencode.json`
+- `--global`: installs `~/.config/opencode/plugins/bash-approve.ts`, copies the Go runtime into `~/.config/opencode/bash-approve/`, and configures `~/.config/opencode/opencode.json`
+
+TypeScript support for the OpenCode plugin is enforced via `bun --cwd opencode-tester run typecheck`.
+
+For this local checkout, a `pre-commit` hook is installed that runs `scripts/typecheck-opencode.sh`.
 - `--both`: installs both layouts
 
 OpenCode needs `permission.bash` set to `ask` so the plugin can turn safe commands into `allow`, dangerous commands into `deny`, and everything else back into the normal OpenCode approval prompt.
