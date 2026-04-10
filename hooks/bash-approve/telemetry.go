@@ -2,8 +2,11 @@ package main
 
 import (
 	"database/sql"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -39,6 +42,69 @@ func sqliteFilesFor(base string) []string {
 		}
 	}
 	return files
+}
+
+var copyFile = copyFileStdlib
+
+func copyFileStdlib(src, dst string) (err error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := in.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := out.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
+
+	_, err = io.Copy(out, in)
+	return err
+}
+
+func cleanupFiles(paths []string) {
+	for _, path := range paths {
+		_ = os.Remove(path)
+	}
+}
+
+func copyLegacyTelemetryFiles(legacyPath, destPath string) error {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+		return err
+	}
+
+	copied := make([]string, 0, 4)
+	for _, src := range sqliteFilesFor(legacyPath) {
+		dst := destPath + strings.TrimPrefix(src, legacyPath)
+		if err := copyFile(src, dst); err != nil {
+			cleanupFiles(append(copied, dst))
+			return err
+		}
+		copied = append(copied, dst)
+	}
+	return nil
+}
+
+func deleteLegacyTelemetryFiles(legacyPath string) error {
+	for _, path := range sqliteFilesFor(legacyPath) {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
 }
 
 // openTelemetryDB opens (or creates) telemetry.db next to the running executable.
