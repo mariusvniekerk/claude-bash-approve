@@ -47,6 +47,11 @@ func sqliteFilesFor(base string) []string {
 var copyFile = copyFileStdlib
 
 func copyFileStdlib(src, dst string) (err error) {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -61,7 +66,7 @@ func copyFileStdlib(src, dst string) (err error) {
 		return err
 	}
 
-	out, err := os.Create(dst)
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
 	if err != nil {
 		return err
 	}
@@ -71,8 +76,11 @@ func copyFileStdlib(src, dst string) (err error) {
 		}
 	}()
 
-	_, err = io.Copy(out, in)
-	return err
+	if _, err = io.Copy(out, in); err != nil {
+		return err
+	}
+
+	return os.Chmod(dst, info.Mode().Perm())
 }
 
 func cleanupFiles(paths []string) {
@@ -81,20 +89,97 @@ func cleanupFiles(paths []string) {
 	}
 }
 
+type copiedTelemetryFile struct {
+	dst         string
+	backup      string
+	temp        string
+	hadExisting bool
+}
+
+func rollbackCopiedTelemetryFiles(files []copiedTelemetryFile) {
+	for i := len(files) - 1; i >= 0; i-- {
+		file := files[i]
+		cleanupFiles([]string{file.temp})
+		if file.backup == "" {
+			if !file.hadExisting {
+				cleanupFiles([]string{file.dst})
+			}
+			continue
+		}
+		cleanupFiles([]string{file.dst})
+		_ = os.Rename(file.backup, file.dst)
+	}
+}
+
+func finalizeCopiedTelemetryFiles(files []copiedTelemetryFile) {
+	for _, file := range files {
+		cleanupFiles([]string{file.backup, file.temp})
+	}
+}
+
+func temporaryTelemetryFilePath(path, pattern string) (string, error) {
+	temp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+pattern)
+	if err != nil {
+		return "", err
+	}
+	name := temp.Name()
+	if err := temp.Close(); err != nil {
+		cleanupFiles([]string{name})
+		return "", err
+	}
+	cleanupFiles([]string{name})
+	return name, nil
+}
+
 func copyLegacyTelemetryFiles(legacyPath, destPath string) error {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
 		return err
 	}
 
-	copied := make([]string, 0, 4)
+	copied := make([]copiedTelemetryFile, 0, 4)
 	for _, src := range sqliteFilesFor(legacyPath) {
 		dst := destPath + strings.TrimPrefix(src, legacyPath)
-		if err := copyFile(src, dst); err != nil {
-			cleanupFiles(append(copied, dst))
+		tempPath, err := temporaryTelemetryFilePath(dst, ".tmp-*")
+		if err != nil {
+			rollbackCopiedTelemetryFiles(copied)
 			return err
 		}
-		copied = append(copied, dst)
+
+		entry := copiedTelemetryFile{dst: dst, temp: tempPath}
+		if _, err := os.Stat(dst); err == nil {
+			entry.hadExisting = true
+		} else if !errors.Is(err, os.ErrNotExist) {
+			rollbackCopiedTelemetryFiles(append(copied, entry))
+			return err
+		}
+
+		if err := copyFile(src, tempPath); err != nil {
+			rollbackCopiedTelemetryFiles(append(copied, entry))
+			return err
+		}
+
+		if entry.hadExisting {
+			backupPath, backupErr := temporaryTelemetryFilePath(dst, ".bak-*")
+			if backupErr != nil {
+				rollbackCopiedTelemetryFiles(append(copied, entry))
+				return backupErr
+			}
+			entry.backup = backupPath
+			if err := os.Rename(dst, backupPath); err != nil {
+				rollbackCopiedTelemetryFiles(append(copied, entry))
+				return err
+			}
+		}
+
+		copied = append(copied, entry)
+		if err := os.Rename(tempPath, dst); err != nil {
+			rollbackCopiedTelemetryFiles(copied)
+			return err
+		}
+		copied[len(copied)-1].temp = ""
 	}
+
+	finalizeCopiedTelemetryFiles(copied)
 	return nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -117,6 +118,33 @@ func TestCopyLegacyTelemetryFilesCopiesDatabaseAndSidecars(t *testing.T) {
 	}
 }
 
+func TestCopyLegacyTelemetryFilesPreservesSourcePermissions(t *testing.T) {
+	root := t.TempDir()
+	legacy := filepath.Join(root, "legacy", "telemetry.db")
+	dest := filepath.Join(root, "state", "telemetry.db")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldUmask := syscall.Umask(0o022)
+	defer syscall.Umask(oldUmask)
+
+	if err := os.WriteFile(legacy, []byte("legacy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyLegacyTelemetryFiles(legacy, dest); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("dest mode = %#o, want %#o", info.Mode().Perm(), 0o600)
+	}
+}
+
 func TestDeleteLegacyTelemetryFilesRemovesLegacyFilesAfterSuccess(t *testing.T) {
 	root := t.TempDir()
 	legacy := filepath.Join(root, "legacy", "telemetry.db")
@@ -177,6 +205,59 @@ func TestCopyLegacyTelemetryFilesCleansPartialDestinationOnFailure(t *testing.T)
 	for _, suffix := range []string{"", "-wal", "-shm"} {
 		if _, err := os.Stat(dest + suffix); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("dest%s still exists after rollback, err = %v", suffix, err)
+		}
+	}
+}
+
+func TestCopyLegacyTelemetryFilesRestoresExistingDestinationOnFailure(t *testing.T) {
+	root := t.TempDir()
+	legacy := filepath.Join(root, "legacy", "telemetry.db")
+	dest := filepath.Join(root, "state", "telemetry.db")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{"", "-wal"} {
+		if err := os.WriteFile(legacy+suffix, []byte("legacy"+suffix), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dest+suffix, []byte("existing"+suffix), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	calls := 0
+	copyFile = func(src, dst string) error {
+		calls++
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if calls == 1 {
+			data, err := os.ReadFile(src)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(dst, data, 0o600)
+		}
+		if err := os.WriteFile(dst, []byte("partial"), 0o600); err != nil {
+			return err
+		}
+		return errors.New("boom")
+	}
+	defer func() { copyFile = copyFileStdlib }()
+
+	if err := copyLegacyTelemetryFiles(legacy, dest); err == nil {
+		t.Fatal("expected copy error")
+	}
+	for _, suffix := range []string{"", "-wal"} {
+		got, err := os.ReadFile(dest + suffix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != "existing"+suffix {
+			t.Fatalf("dest%s = %q, want existing contents restored", suffix, string(got))
 		}
 	}
 }
