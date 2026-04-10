@@ -85,3 +85,9 @@ Temporary Items
 # Cache
 .cache/
 go/
+
+# Node dependencies
+node_modules/
+
+# Local tooling
+.pi-lens/

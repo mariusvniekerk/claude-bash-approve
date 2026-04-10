@@ -1,0 +1,12 @@
+{
+  "private": true,
+  "workspaces": [
+    "opencode-tester"
+  ],
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.4.1"
+  },
+  "scripts": {
+    "typecheck": "bun run --cwd opencode-tester typecheck"
+  }
+}

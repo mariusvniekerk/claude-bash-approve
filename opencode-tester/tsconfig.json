@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noEmit": true,
+    "paths": {
+      "@opencode-ai/plugin": ["./node_modules/@opencode-ai/plugin"]
+    },
+    "types": ["node", "bun-types"],
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "../opencode/**/*.ts"
+  ]
+}

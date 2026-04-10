@@ -1231,6 +1231,57 @@ func TestEvaluateToolUse_ReadAndGrepRepoScoped(t *testing.T) {
 	})
 }
 
+func TestEvaluateOpenCodeToolUse_Bash(t *testing.T) {
+	cfg := Config{Enabled: []string{"all"}}
+
+	t.Run("bash command is evaluated", func(t *testing.T) {
+		input := OpenCodeInput{
+			Tool:    "bash",
+			Command: "git status",
+			Cwd:     t.TempDir(),
+		}
+
+		cmd, r := evaluateOpenCodeToolUse(input, cfg)
+		require.NotNil(t, r)
+		assert.Equal(t, "git status", cmd)
+		assert.Equal(t, "git read op", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("unsupported tool is ignored", func(t *testing.T) {
+		cmd, r := evaluateOpenCodeToolUse(OpenCodeInput{Tool: "read", Command: "foo"}, cfg)
+		assert.Empty(t, cmd)
+		assert.Nil(t, r)
+	})
+}
+
+func TestBuildOpenCodeOutput(t *testing.T) {
+	t.Run("allow decision is preserved", func(t *testing.T) {
+		out := buildOpenCodeOutput(&result{decision: decisionAllow, reason: "git read op"})
+		assert.Equal(t, OpenCodeOutput{Decision: decisionAllow, Reason: "git read op"}, out)
+	})
+
+	t.Run("deny prefers human deny reason", func(t *testing.T) {
+		out := buildOpenCodeOutput(&result{decision: decisionDeny, reason: "git destructive", denyReason: "destructive git command"})
+		assert.Equal(t, OpenCodeOutput{Decision: decisionDeny, Reason: "destructive git command"}, out)
+	})
+
+	t.Run("ask decision is preserved", func(t *testing.T) {
+		out := buildOpenCodeOutput(&result{decision: decisionAsk, reason: "git tag"})
+		assert.Equal(t, OpenCodeOutput{Decision: decisionAsk, Reason: "git tag"}, out)
+	})
+
+	t.Run("no decision becomes noop", func(t *testing.T) {
+		out := buildOpenCodeOutput(&result{reason: "unknown"})
+		assert.Equal(t, OpenCodeOutput{Decision: "noop", Reason: "unknown"}, out)
+	})
+
+	t.Run("nil result becomes noop", func(t *testing.T) {
+		out := buildOpenCodeOutput(nil)
+		assert.Equal(t, OpenCodeOutput{Decision: "noop"}, out)
+	})
+}
+
 func writeTestConfig(t *testing.T, content string) string {
 	t.Helper()
 	dir := t.TempDir()
