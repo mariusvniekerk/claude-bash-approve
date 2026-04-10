@@ -476,6 +476,28 @@ func TestOpenTelemetryDBCreatesFreshDatabaseWhenLegacyPathResolvesButFileIsMissi
 	defer opened.Close()
 }
 
+func TestOpenTelemetryDBDisablesTelemetryWhenLegacyPathStatFails(t *testing.T) {
+	root := t.TempDir()
+	stateRoot := filepath.Join(root, "state")
+	legacyRoot := filepath.Join(root, "legacy")
+	if err := os.MkdirAll(legacyRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(legacyRoot, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(legacyRoot, 0o755) //nolint:errcheck // restore tempdir access for cleanup
+	telemetryHomeDir = func() (string, error) { return root, nil }
+	telemetryExecutable = func() (string, error) { return filepath.Join(legacyRoot, "approve-bash"), nil }
+	defer resetTelemetryTestHooks()
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+
+	if db := openTelemetryDB(); db != nil {
+		defer db.Close()
+		t.Fatal("expected nil db")
+	}
+}
+
 func TestOpenTelemetryDBDisablesTelemetryWhenDestinationExistsButIsInvalidAndLegacyMissing(t *testing.T) {
 	root := t.TempDir()
 	stateRoot := filepath.Join(root, "state")
@@ -544,11 +566,8 @@ func TestOpenTelemetryDBTreatsDestinationCreatedDuringMigrationAsSuccess(t *test
 	telemetryExecutable = func() (string, error) { return filepath.Join(legacyRoot, "approve-bash"), nil }
 	defer resetTelemetryTestHooks()
 	t.Setenv("XDG_STATE_HOME", stateRoot)
-	copyFile = func(src, dst string) error {
-		if dst == destPath {
-			if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
-				return err
-			}
+	renameFile = func(oldPath, newPath string) error {
+		if newPath == destPath && strings.Contains(filepath.Base(oldPath), filepath.Base(destPath)+".tmp-") {
 			winner, err := sql.Open("sqlite", destPath)
 			if err != nil {
 				return err
@@ -562,9 +581,9 @@ func TestOpenTelemetryDBTreatsDestinationCreatedDuringMigrationAsSuccess(t *test
 			}
 			return os.ErrExist
 		}
-		return copyFileStdlib(src, dst)
+		return os.Rename(oldPath, newPath)
 	}
-	defer func() { copyFile = copyFileStdlib }()
+	defer func() { renameFile = os.Rename }()
 
 	opened := openTelemetryDB()
 	if opened == nil {
@@ -611,4 +630,15 @@ func TestOpenTelemetryDBContinuesWhenLegacyDeleteFailsAfterSuccessfulMigration(t
 		t.Fatal("expected db")
 	}
 	defer opened.Close()
+
+	var command string
+	if err := opened.QueryRow(`SELECT command FROM decisions LIMIT 1`).Scan(&command); err != nil {
+		t.Fatal(err)
+	}
+	if command != "keep-new" {
+		t.Fatalf("command = %q, want keep-new", command)
+	}
+	if _, err := os.Stat(legacyPath); err != nil {
+		t.Fatalf("expected legacy db to remain after delete failure, err = %v", err)
+	}
 }

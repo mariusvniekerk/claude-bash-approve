@@ -145,33 +145,55 @@ func copyLegacyTelemetryFiles(legacyPath, destPath string) error {
 	copied := make([]copiedTelemetryFile, 0, 4)
 	for _, src := range sqliteFilesFor(legacyPath) {
 		dst := destPath + strings.TrimPrefix(src, legacyPath)
-		entry := copiedTelemetryFile{dst: dst}
-		if _, err := os.Stat(dst); err == nil {
-			backupPath, backupErr := temporaryTelemetryFilePath(dst, ".bak-*")
-			if backupErr != nil {
-				rollbackCopiedTelemetryFiles(copied)
-				return backupErr
-			}
-			if err := renameFile(dst, backupPath); err != nil {
-				cleanupFiles([]string{backupPath})
-				rollbackCopiedTelemetryFiles(copied)
-				return err
-			}
-			entry.hadExisting = true
-			entry.backup = backupPath
-		} else if !errors.Is(err, os.ErrNotExist) {
+		tempPath, err := temporaryTelemetryFilePath(dst, ".tmp-*")
+		if err != nil {
 			rollbackCopiedTelemetryFiles(copied)
 			return err
 		}
 
+		entry := copiedTelemetryFile{dst: dst, temp: tempPath}
+		if _, err := os.Stat(dst); err == nil {
+			entry.hadExisting = true
+		} else if !errors.Is(err, os.ErrNotExist) {
+			rollbackCopiedTelemetryFiles(append(copied, entry))
+			return err
+		}
+
+		if err := copyFile(src, tempPath); err != nil {
+			rollbackCopiedTelemetryFiles(append(copied, entry))
+			return err
+		}
+
+		if entry.hadExisting {
+			backupPath, backupErr := temporaryTelemetryFilePath(dst, ".bak-*")
+			if backupErr != nil {
+				rollbackCopiedTelemetryFiles(append(copied, entry))
+				return backupErr
+			}
+			if err := renameFile(dst, backupPath); err != nil {
+				cleanupFiles([]string{backupPath})
+				rollbackCopiedTelemetryFiles(append(copied, entry))
+				return err
+			}
+			entry.backup = backupPath
+		} else if _, err := os.Stat(dst); err == nil {
+			cleanupFiles([]string{tempPath})
+			return os.ErrExist
+		} else if !errors.Is(err, os.ErrNotExist) {
+			rollbackCopiedTelemetryFiles(append(copied, entry))
+			return err
+		}
+
 		copied = append(copied, entry)
-		if err := copyFile(src, dst); err != nil {
+		if err := renameFile(tempPath, dst); err != nil {
 			if errors.Is(err, os.ErrExist) {
+				cleanupFiles([]string{tempPath})
 				return err
 			}
 			rollbackCopiedTelemetryFiles(copied)
 			return err
 		}
+		copied[len(copied)-1].temp = ""
 	}
 
 	finalizeCopiedTelemetryFiles(copied)
@@ -297,6 +319,9 @@ func ensureTelemetryDBReady(destPath string) (string, bool) {
 		return destPath, true
 	}
 	if _, err := os.Stat(legacyPath); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", false
+		}
 		if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
 			cleanupTelemetryArtifacts(destPath)
 			return "", false
