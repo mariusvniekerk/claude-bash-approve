@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -259,5 +260,43 @@ func TestCopyLegacyTelemetryFilesRestoresExistingDestinationOnFailure(t *testing
 		if string(got) != "existing"+suffix {
 			t.Fatalf("dest%s = %q, want existing contents restored", suffix, string(got))
 		}
+	}
+}
+
+func TestCopyLegacyTelemetryFilesPreservesExistingDestinationWhenBackupRenameFails(t *testing.T) {
+	root := t.TempDir()
+	legacy := filepath.Join(root, "legacy", "telemetry.db")
+	dest := filepath.Join(root, "state", "telemetry.db")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte("legacy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte("existing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	renameFile = func(oldPath, newPath string) error {
+		if strings.Contains(filepath.Base(newPath), ".bak-") {
+			return errors.New("boom")
+		}
+		return os.Rename(oldPath, newPath)
+	}
+	defer func() { renameFile = os.Rename }()
+
+	if err := copyLegacyTelemetryFiles(legacy, dest); err == nil {
+		t.Fatal("expected copy error")
+	}
+
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "existing" {
+		t.Fatalf("dest = %q, want existing contents preserved", string(got))
 	}
 }

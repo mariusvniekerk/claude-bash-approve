@@ -45,6 +45,7 @@ func sqliteFilesFor(base string) []string {
 }
 
 var copyFile = copyFileStdlib
+var renameFile = os.Rename
 
 func copyFileStdlib(src, dst string) (err error) {
 	info, err := os.Stat(src)
@@ -107,7 +108,7 @@ func rollbackCopiedTelemetryFiles(files []copiedTelemetryFile) {
 			continue
 		}
 		cleanupFiles([]string{file.dst})
-		_ = os.Rename(file.backup, file.dst)
+		_ = renameFile(file.backup, file.dst)
 	}
 }
 
@@ -164,15 +165,15 @@ func copyLegacyTelemetryFiles(legacyPath, destPath string) error {
 				rollbackCopiedTelemetryFiles(append(copied, entry))
 				return backupErr
 			}
-			entry.backup = backupPath
-			if err := os.Rename(dst, backupPath); err != nil {
+			if err := renameFile(dst, backupPath); err != nil {
 				rollbackCopiedTelemetryFiles(append(copied, entry))
 				return err
 			}
+			entry.backup = backupPath
 		}
 
 		copied = append(copied, entry)
-		if err := os.Rename(tempPath, dst); err != nil {
+		if err := renameFile(tempPath, dst); err != nil {
 			rollbackCopiedTelemetryFiles(copied)
 			return err
 		}
