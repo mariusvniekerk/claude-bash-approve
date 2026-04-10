@@ -8,6 +8,19 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func telemetryDBPath(homeDir func() (string, error)) (string, bool) {
+	if xdgStateHome := os.Getenv("XDG_STATE_HOME"); xdgStateHome != "" && filepath.IsAbs(xdgStateHome) {
+		return filepath.Join(xdgStateHome, "claude-bash-approve", "telemetry.db"), true
+	}
+
+	home, err := homeDir()
+	if err != nil || home == "" {
+		return "", false
+	}
+
+	return filepath.Join(home, ".local", "state", "claude-bash-approve", "telemetry.db"), true
+}
+
 // openTelemetryDB opens (or creates) telemetry.db next to the running executable.
 // Returns nil if anything goes wrong — telemetry must never break the hook.
 func openTelemetryDB() *sql.DB {
