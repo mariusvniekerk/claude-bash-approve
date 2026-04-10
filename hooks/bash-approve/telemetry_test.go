@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	_ "modernc.org/sqlite"
 )
 
 func TestTelemetryDBPathUsesXDGStateHome(t *testing.T) {
@@ -299,4 +301,314 @@ func TestCopyLegacyTelemetryFilesPreservesExistingDestinationWhenBackupRenameFai
 	if string(got) != "existing" {
 		t.Fatalf("dest = %q, want existing contents preserved", string(got))
 	}
+}
+
+func TestOpenTelemetryDBUsesExistingUsableDestinationEvenWhenLegacyExists(t *testing.T) {
+	root := t.TempDir()
+	stateRoot := filepath.Join(root, "state")
+	legacyRoot := filepath.Join(root, "legacy")
+	destPath := filepath.Join(stateRoot, "claude-bash-approve", "telemetry.db")
+	legacyPath := filepath.Join(legacyRoot, "telemetry.db")
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(legacyRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", destPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, command TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO decisions(command) VALUES ('existing')`); err != nil {
+		t.Fatal(err)
+	}
+	legacyDB, err := sql.Open("sqlite", legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer legacyDB.Close()
+	if _, err := legacyDB.Exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, command TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacyDB.Exec(`INSERT INTO decisions(command) VALUES ('legacy')`); err != nil {
+		t.Fatal(err)
+	}
+	telemetryHomeDir = func() (string, error) { return root, nil }
+	telemetryExecutable = func() (string, error) { return filepath.Join(legacyRoot, "approve-bash"), nil }
+	defer resetTelemetryTestHooks()
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+
+	opened := openTelemetryDB()
+	if opened == nil {
+		t.Fatal("expected db")
+	}
+	defer opened.Close()
+
+	var command string
+	if err := opened.QueryRow(`SELECT command FROM decisions LIMIT 1`).Scan(&command); err != nil {
+		t.Fatal(err)
+	}
+	if command != "existing" {
+		t.Fatalf("command = %q, want existing", command)
+	}
+}
+
+func TestOpenTelemetryDBMigratesLegacyDatabaseBeforeOpening(t *testing.T) {
+	root := t.TempDir()
+	legacyRoot := filepath.Join(root, "legacy")
+	stateRoot := filepath.Join(root, "state")
+	if err := os.MkdirAll(legacyRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacyPath := filepath.Join(legacyRoot, "telemetry.db")
+	legacyDB, err := sql.Open("sqlite", legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer legacyDB.Close()
+	if _, err := legacyDB.Exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, command TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacyDB.Exec(`INSERT INTO decisions(command) VALUES ('git status')`); err != nil {
+		t.Fatal(err)
+	}
+	telemetryHomeDir = func() (string, error) { return root, nil }
+	telemetryExecutable = func() (string, error) { return filepath.Join(legacyRoot, "approve-bash"), nil }
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+	defer resetTelemetryTestHooks()
+
+	opened := openTelemetryDB()
+	if opened == nil {
+		t.Fatal("expected db")
+	}
+	defer opened.Close()
+
+	var count int
+	if err := opened.QueryRow(`SELECT count(*) FROM decisions`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("count = %d, want 1", count)
+	}
+}
+
+func TestOpenTelemetryDBRetriesMigrationWhenDestinationInvalidAndLegacyExists(t *testing.T) {
+	root := t.TempDir()
+	legacyRoot := filepath.Join(root, "legacy")
+	stateRoot := filepath.Join(root, "state")
+	destDir := filepath.Join(stateRoot, "claude-bash-approve")
+	if err := os.MkdirAll(legacyRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(destDir, "telemetry.db"), []byte("broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	legacyPath := filepath.Join(legacyRoot, "telemetry.db")
+	legacyDB, err := sql.Open("sqlite", legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer legacyDB.Close()
+	if _, err := legacyDB.Exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, command TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacyDB.Exec(`INSERT INTO decisions(command) VALUES ('recovered')`); err != nil {
+		t.Fatal(err)
+	}
+	telemetryHomeDir = func() (string, error) { return root, nil }
+	telemetryExecutable = func() (string, error) { return filepath.Join(legacyRoot, "approve-bash"), nil }
+	defer resetTelemetryTestHooks()
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+
+	opened := openTelemetryDB()
+	if opened == nil {
+		t.Fatal("expected db")
+	}
+	defer opened.Close()
+
+	var command string
+	if err := opened.QueryRow(`SELECT command FROM decisions LIMIT 1`).Scan(&command); err != nil {
+		t.Fatal(err)
+	}
+	if command != "recovered" {
+		t.Fatalf("command = %q, want recovered", command)
+	}
+}
+
+func TestOpenTelemetryDBCreatesFreshDatabaseWhenLegacyPathUnavailable(t *testing.T) {
+	root := t.TempDir()
+	stateRoot := filepath.Join(root, "state")
+	telemetryHomeDir = func() (string, error) { return root, nil }
+	telemetryExecutable = func() (string, error) { return "", errors.New("no exe") }
+	defer resetTelemetryTestHooks()
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+
+	opened := openTelemetryDB()
+	if opened == nil {
+		t.Fatal("expected fresh db")
+	}
+	defer opened.Close()
+}
+
+func TestOpenTelemetryDBCreatesFreshDatabaseWhenLegacyPathResolvesButFileIsMissing(t *testing.T) {
+	root := t.TempDir()
+	stateRoot := filepath.Join(root, "state")
+	legacyRoot := filepath.Join(root, "legacy")
+	if err := os.MkdirAll(legacyRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	telemetryHomeDir = func() (string, error) { return root, nil }
+	telemetryExecutable = func() (string, error) { return filepath.Join(legacyRoot, "approve-bash"), nil }
+	defer resetTelemetryTestHooks()
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+
+	opened := openTelemetryDB()
+	if opened == nil {
+		t.Fatal("expected fresh db")
+	}
+	defer opened.Close()
+}
+
+func TestOpenTelemetryDBDisablesTelemetryWhenDestinationExistsButIsInvalidAndLegacyMissing(t *testing.T) {
+	root := t.TempDir()
+	stateRoot := filepath.Join(root, "state")
+	destDir := filepath.Join(stateRoot, "claude-bash-approve")
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(destDir, "telemetry.db"), []byte("not sqlite"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	telemetryHomeDir = func() (string, error) { return root, nil }
+	telemetryExecutable = func() (string, error) { return "", errors.New("no exe") }
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+	defer resetTelemetryTestHooks()
+
+	if db := openTelemetryDB(); db != nil {
+		t.Fatal("expected nil db")
+	}
+}
+
+func TestOpenTelemetryDBDisablesTelemetryWhenDestinationInvalidAndLegacyPathResolvesButFileMissing(t *testing.T) {
+	root := t.TempDir()
+	stateRoot := filepath.Join(root, "state")
+	legacyRoot := filepath.Join(root, "legacy")
+	destDir := filepath.Join(stateRoot, "claude-bash-approve")
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(legacyRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(destDir, "telemetry.db"), []byte("not sqlite"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	telemetryHomeDir = func() (string, error) { return root, nil }
+	telemetryExecutable = func() (string, error) { return filepath.Join(legacyRoot, "approve-bash"), nil }
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+	defer resetTelemetryTestHooks()
+
+	if db := openTelemetryDB(); db != nil {
+		t.Fatal("expected nil db")
+	}
+}
+
+func TestOpenTelemetryDBTreatsDestinationCreatedDuringMigrationAsSuccess(t *testing.T) {
+	root := t.TempDir()
+	legacyRoot := filepath.Join(root, "legacy")
+	stateRoot := filepath.Join(root, "state")
+	legacyPath := filepath.Join(legacyRoot, "telemetry.db")
+	destPath := filepath.Join(stateRoot, "claude-bash-approve", "telemetry.db")
+	if err := os.MkdirAll(legacyRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacyDB, err := sql.Open("sqlite", legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer legacyDB.Close()
+	if _, err := legacyDB.Exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, command TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacyDB.Exec(`INSERT INTO decisions(command) VALUES ('legacy')`); err != nil {
+		t.Fatal(err)
+	}
+	telemetryHomeDir = func() (string, error) { return root, nil }
+	telemetryExecutable = func() (string, error) { return filepath.Join(legacyRoot, "approve-bash"), nil }
+	defer resetTelemetryTestHooks()
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+	copyFile = func(src, dst string) error {
+		if dst == destPath {
+			if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+				return err
+			}
+			winner, err := sql.Open("sqlite", destPath)
+			if err != nil {
+				return err
+			}
+			defer winner.Close()
+			if _, err := winner.Exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, command TEXT)`); err != nil {
+				return err
+			}
+			if _, err := winner.Exec(`INSERT INTO decisions(command) VALUES ('won-race')`); err != nil {
+				return err
+			}
+			return os.ErrExist
+		}
+		return copyFileStdlib(src, dst)
+	}
+	defer func() { copyFile = copyFileStdlib }()
+
+	opened := openTelemetryDB()
+	if opened == nil {
+		t.Fatal("expected db")
+	}
+	defer opened.Close()
+
+	var command string
+	if err := opened.QueryRow(`SELECT command FROM decisions LIMIT 1`).Scan(&command); err != nil {
+		t.Fatal(err)
+	}
+	if command != "won-race" {
+		t.Fatalf("command = %q, want won-race", command)
+	}
+}
+
+func TestOpenTelemetryDBContinuesWhenLegacyDeleteFailsAfterSuccessfulMigration(t *testing.T) {
+	root := t.TempDir()
+	legacyRoot := filepath.Join(root, "legacy")
+	stateRoot := filepath.Join(root, "state")
+	if err := os.MkdirAll(legacyRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacyPath := filepath.Join(legacyRoot, "telemetry.db")
+	legacyDB, err := sql.Open("sqlite", legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer legacyDB.Close()
+	if _, err := legacyDB.Exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, command TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacyDB.Exec(`INSERT INTO decisions(command) VALUES ('keep-new')`); err != nil {
+		t.Fatal(err)
+	}
+	telemetryHomeDir = func() (string, error) { return root, nil }
+	telemetryExecutable = func() (string, error) { return filepath.Join(legacyRoot, "approve-bash"), nil }
+	deleteLegacyFiles = func(string) error { return errors.New("cannot delete") }
+	defer resetTelemetryTestHooks()
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+
+	opened := openTelemetryDB()
+	if opened == nil {
+		t.Fatal("expected db")
+	}
+	defer opened.Close()
 }

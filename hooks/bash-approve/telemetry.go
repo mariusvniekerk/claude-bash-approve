@@ -44,8 +44,13 @@ func sqliteFilesFor(base string) []string {
 	return files
 }
 
-var copyFile = copyFileStdlib
-var renameFile = os.Rename
+var (
+	telemetryHomeDir    = os.UserHomeDir
+	telemetryExecutable = os.Executable
+	copyFile            = copyFileStdlib
+	renameFile          = os.Rename
+	deleteLegacyFiles   = deleteLegacyTelemetryFiles
+)
 
 func copyFileStdlib(src, dst string) (err error) {
 	info, err := os.Stat(src)
@@ -140,44 +145,33 @@ func copyLegacyTelemetryFiles(legacyPath, destPath string) error {
 	copied := make([]copiedTelemetryFile, 0, 4)
 	for _, src := range sqliteFilesFor(legacyPath) {
 		dst := destPath + strings.TrimPrefix(src, legacyPath)
-		tempPath, err := temporaryTelemetryFilePath(dst, ".tmp-*")
-		if err != nil {
-			rollbackCopiedTelemetryFiles(copied)
-			return err
-		}
-
-		entry := copiedTelemetryFile{dst: dst, temp: tempPath}
+		entry := copiedTelemetryFile{dst: dst}
 		if _, err := os.Stat(dst); err == nil {
-			entry.hadExisting = true
-		} else if !errors.Is(err, os.ErrNotExist) {
-			rollbackCopiedTelemetryFiles(append(copied, entry))
-			return err
-		}
-
-		if err := copyFile(src, tempPath); err != nil {
-			rollbackCopiedTelemetryFiles(append(copied, entry))
-			return err
-		}
-
-		if entry.hadExisting {
 			backupPath, backupErr := temporaryTelemetryFilePath(dst, ".bak-*")
 			if backupErr != nil {
-				rollbackCopiedTelemetryFiles(append(copied, entry))
+				rollbackCopiedTelemetryFiles(copied)
 				return backupErr
 			}
 			if err := renameFile(dst, backupPath); err != nil {
-				rollbackCopiedTelemetryFiles(append(copied, entry))
+				cleanupFiles([]string{backupPath})
+				rollbackCopiedTelemetryFiles(copied)
 				return err
 			}
+			entry.hadExisting = true
 			entry.backup = backupPath
-		}
-
-		copied = append(copied, entry)
-		if err := renameFile(tempPath, dst); err != nil {
+		} else if !errors.Is(err, os.ErrNotExist) {
 			rollbackCopiedTelemetryFiles(copied)
 			return err
 		}
-		copied[len(copied)-1].temp = ""
+
+		copied = append(copied, entry)
+		if err := copyFile(src, dst); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				return err
+			}
+			rollbackCopiedTelemetryFiles(copied)
+			return err
+		}
 	}
 
 	finalizeCopiedTelemetryFiles(copied)
@@ -193,19 +187,23 @@ func deleteLegacyTelemetryFiles(legacyPath string) error {
 	return nil
 }
 
-// openTelemetryDB opens (or creates) telemetry.db next to the running executable.
-// Returns nil if anything goes wrong — telemetry must never break the hook.
-func openTelemetryDB() *sql.DB {
-	exe, err := os.Executable()
-	if err != nil {
-		return nil
-	}
-	dbPath := filepath.Join(filepath.Dir(exe), "telemetry.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		return nil
-	}
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS decisions (
+func resetTelemetryTestHooks() {
+	telemetryHomeDir = os.UserHomeDir
+	telemetryExecutable = os.Executable
+	copyFile = copyFileStdlib
+	deleteLegacyFiles = deleteLegacyTelemetryFiles
+}
+
+func telemetryArtifactPaths(base string) []string {
+	return []string{base, base + "-wal", base + "-shm", base + "-journal"}
+}
+
+func cleanupTelemetryArtifacts(base string) {
+	cleanupFiles(telemetryArtifactPaths(base))
+}
+
+func initTelemetrySchema(db *sql.DB) bool {
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS decisions (
 		id       INTEGER PRIMARY KEY,
 		ts       TEXT DEFAULT (datetime('now')),
 		payload  TEXT,
@@ -213,8 +211,115 @@ func openTelemetryDB() *sql.DB {
 		decision TEXT,
 		reason   TEXT
 	)`)
+	return err == nil
+}
+
+func validateTelemetryDBPath(path string) bool {
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
+		return false
+	}
+	defer db.Close() //nolint:errcheck // best-effort telemetry validation
+
+	return initTelemetrySchema(db)
+}
+
+func openAndValidateTelemetryDB(path string) (*sql.DB, bool) {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, false
+	}
+	if !initTelemetrySchema(db) {
 		db.Close() //nolint:errcheck // best-effort telemetry
+		return nil, false
+	}
+	return db, true
+}
+
+func migrateLegacyTelemetryDB(legacyPath, destPath string) (string, bool) {
+	sourceFiles := sqliteFilesFor(legacyPath)
+	if len(sourceFiles) == 0 {
+		cleanupTelemetryArtifacts(destPath)
+		return "", false
+	}
+
+	if err := copyLegacyTelemetryFiles(legacyPath, destPath); err != nil {
+		if errors.Is(err, os.ErrExist) && validateTelemetryDBPath(destPath) {
+			return destPath, true
+		}
+		cleanupTelemetryArtifacts(destPath)
+		return "", false
+	}
+
+	for _, src := range sourceFiles {
+		dst := destPath + strings.TrimPrefix(src, legacyPath)
+		if _, err := os.Stat(dst); err != nil {
+			cleanupTelemetryArtifacts(destPath)
+			return "", false
+		}
+	}
+	if !validateTelemetryDBPath(destPath) {
+		cleanupTelemetryArtifacts(destPath)
+		return "", false
+	}
+
+	_ = deleteLegacyFiles(legacyPath)
+	return destPath, true
+}
+
+func ensureTelemetryDBReady(destPath string) (string, bool) {
+	if _, err := os.Stat(destPath); err == nil {
+		if validateTelemetryDBPath(destPath) {
+			return destPath, true
+		}
+
+		legacyPath, ok := legacyTelemetryDBPath(telemetryExecutable)
+		if !ok {
+			return "", false
+		}
+		if _, err := os.Stat(legacyPath); err != nil {
+			return "", false
+		}
+
+		cleanupTelemetryArtifacts(destPath)
+		return migrateLegacyTelemetryDB(legacyPath, destPath)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		cleanupTelemetryArtifacts(destPath)
+		return "", false
+	}
+
+	legacyPath, ok := legacyTelemetryDBPath(telemetryExecutable)
+	if !ok {
+		if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+			cleanupTelemetryArtifacts(destPath)
+			return "", false
+		}
+		return destPath, true
+	}
+	if _, err := os.Stat(legacyPath); err != nil {
+		if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+			cleanupTelemetryArtifacts(destPath)
+			return "", false
+		}
+		return destPath, true
+	}
+
+	return migrateLegacyTelemetryDB(legacyPath, destPath)
+}
+
+// openTelemetryDB opens telemetry.db from XDG state, migrating any legacy copy as needed.
+// Returns nil if anything goes wrong — telemetry must never break the hook.
+func openTelemetryDB() *sql.DB {
+	dbPath, ok := telemetryDBPath(telemetryHomeDir)
+	if !ok {
+		return nil
+	}
+	readyPath, ok := ensureTelemetryDBReady(dbPath)
+	if !ok {
+		return nil
+	}
+	db, ok := openAndValidateTelemetryDB(readyPath)
+	if !ok {
 		return nil
 	}
 	return db
