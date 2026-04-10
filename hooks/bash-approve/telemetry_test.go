@@ -310,7 +310,7 @@ func TestCopyLegacyTelemetryFilesPreservesExistingDestinationWhenBackupRenameFai
 	}
 }
 
-func TestCopyLegacyTelemetryFilesRestoresExistingDestinationWhenFinalRenameHitsErrExist(t *testing.T) {
+func TestCopyLegacyTelemetryFilesKeepsWinnerWhenFinalRenameHitsErrExistAfterBackup(t *testing.T) {
 	root := t.TempDir()
 	legacy := filepath.Join(root, "legacy", "telemetry.db")
 	dest := filepath.Join(root, "state", "telemetry.db")
@@ -346,8 +346,15 @@ func TestCopyLegacyTelemetryFilesRestoresExistingDestinationWhenFinalRenameHitsE
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "existing" {
-		t.Fatalf("dest = %q, want existing contents restored", string(got))
+	if string(got) != "winner" {
+		t.Fatalf("dest = %q, want winner preserved", string(got))
+	}
+	backups, err := filepath.Glob(dest + ".bak-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backups) != 0 {
+		t.Fatalf("unexpected backup files remain: %v", backups)
 	}
 }
 
