@@ -6,15 +6,27 @@ import {
   createOpencodeClient,
   type Event,
   type EventMessagePartUpdated,
-  type Part,
   type EventPermissionAsked,
   type EventPermissionReplied,
+  type Part,
   type ToolPart,
 } from "@opencode-ai/sdk/v2"
 
+import {
+  createPermissionTrackingState,
+  isBashPermission,
+  markTesterReplyFailed,
+  markTesterReplyPending,
+  markTesterReplySucceeded,
+  recordBashPermissionAsked,
+  recordPermissionReplied,
+  shouldIgnoreReplyError,
+} from "./permission-tracking.js"
 import { classifyRun } from "./result.js"
 
 type Reply = "once" | "always" | "reject"
+
+const HOOK_TRACE_PREFIX = "[bash-approve-hook]"
 
 function parseArgs(argv: string[]) {
   const options = {
@@ -133,6 +145,10 @@ function isCompletedToolPart(part: ToolPart) {
   return part.state.status === "completed" || part.state.status === "error"
 }
 
+function observedHook(lines: string[], hookName: string) {
+  return lines.some((line) => line.includes(`${HOOK_TRACE_PREFIX} ${hookName}`))
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2))
   const pluginPath = path.join(options.directory, ".opencode", "plugins", "bash-approve.ts")
@@ -150,9 +166,7 @@ async function main() {
   const permissionReplied: EventPermissionReplied[] = []
   const bashParts: ToolPart[] = []
   const errors: string[] = []
-  const pluginReplyRequestIDs = new Set<string>()
-  const testerReplyRequestIDs = new Set<string>()
-  const repliedRequestIDs = new Set<string>()
+  const permissionState = createPermissionTrackingState()
   const replyTimers = new Map<string, Timer>()
 
   let sessionID = ""
@@ -167,19 +181,25 @@ async function main() {
           const typed = event as Event
           if (typed.type === "permission.asked") {
             if (typed.properties.sessionID !== sessionID) continue
+            if (!isBashPermission(typed.properties.permission)) continue
             stage = "permission-asked"
             console.error(`[tester] permission asked ${typed.properties.id}`)
             permissionAsked.push(typed)
+            recordBashPermissionAsked(permissionState, typed.properties.id)
 
             const timer = setTimeout(async () => {
-              if (repliedRequestIDs.has(typed.properties.id)) return
-              testerReplyRequestIDs.add(typed.properties.id)
+              if (permissionState.repliedRequestIDs.has(typed.properties.id)) return
+              markTesterReplyPending(permissionState, typed.properties.id)
+
               try {
                 await client.permission.reply({
                   requestID: typed.properties.id,
                   reply: options.reply,
                 })
+                markTesterReplySucceeded(permissionState, typed.properties.id)
               } catch (error) {
+                markTesterReplyFailed(permissionState, typed.properties.id)
+                if (shouldIgnoreReplyError(permissionState, typed.properties.id, error)) return
                 errors.push(String(error))
               }
             }, options.replyDelayMs)
@@ -190,19 +210,15 @@ async function main() {
 
           if (typed.type === "permission.replied") {
             if (typed.properties.sessionID !== sessionID) continue
+            if (!recordPermissionReplied(permissionState, typed.properties.requestID)) continue
             stage = "permission-replied"
             console.error(`[tester] permission replied ${typed.properties.requestID} ${typed.properties.reply}`)
             permissionReplied.push(typed)
-            repliedRequestIDs.add(typed.properties.requestID)
 
             const timer = replyTimers.get(typed.properties.requestID)
             if (timer) {
               clearTimeout(timer)
               replyTimers.delete(typed.properties.requestID)
-            }
-
-            if (!testerReplyRequestIDs.has(typed.properties.requestID)) {
-              pluginReplyRequestIDs.add(typed.properties.requestID)
             }
             continue
           }
@@ -294,6 +310,10 @@ async function main() {
   const commandCompleted = latestBashPart?.state.status === "completed"
   const commandError = latestBashPart?.state.status === "error" ? latestBashPart.state.error : undefined
   const commandOutput = latestBashPart?.state.status === "completed" ? latestBashPart.state.output : undefined
+  const hooks = {
+    toolExecuteBefore: observedHook(server.lines, "tool.execute.before"),
+    permissionAsk: observedHook(server.lines, "permission.ask"),
+  }
 
   const summary = {
     directory: options.directory,
@@ -304,8 +324,9 @@ async function main() {
     stage,
     permissionAsked,
     permissionReplied,
-    pluginReplyRequestIDs: [...pluginReplyRequestIDs],
-    testerReplyRequestIDs: [...testerReplyRequestIDs],
+    hooks,
+    pluginReplyRequestIDs: [...permissionState.pluginReplyRequestIDs],
+    testerReplyRequestIDs: [...permissionState.testerReplyRequestIDs],
     bashParts,
     errors,
     commandCompleted,
@@ -314,7 +335,8 @@ async function main() {
     classification: classifyRun({
       permissionAsked: permissionAsked.length,
       permissionReplied: permissionReplied.length,
-      pluginReplied: pluginReplyRequestIDs.size > 0,
+      pluginReplied: permissionState.pluginReplyRequestIDs.size > 0,
+      hooks,
       commandCompleted,
     }),
   }

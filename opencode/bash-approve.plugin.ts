@@ -38,6 +38,8 @@ type PermissionAskedEvent = {
   }
 }
 
+const HOOK_TRACE_PREFIX = "[bash-approve-hook]"
+
 type BashApprovePluginInput = PluginInput & {
   $: NonNullable<PluginInput["$"]>
 }
@@ -67,6 +69,10 @@ function parseDecision(stdout: string): Decision {
   }
 
   return { decision: "ask", reason: stdout }
+}
+
+function traceHook(name: string) {
+  console.error(`${HOOK_TRACE_PREFIX} ${name}`)
 }
 
 export const BashApprovePlugin = async ({ directory, serverUrl, $ }: BashApprovePluginInput): Promise<Hooks> => {
@@ -124,6 +130,7 @@ export const BashApprovePlugin = async ({ directory, serverUrl, $ }: BashApprove
   return {
     "tool.execute.before": async (input: ToolExecuteBeforeInput, output: ToolExecuteBeforeOutput) => {
       if (input.tool !== "bash") return
+      traceHook("tool.execute.before")
 
       const info = {
         command: output.args.command,
@@ -163,6 +170,7 @@ export const BashApprovePlugin = async ({ directory, serverUrl, $ }: BashApprove
     "permission.ask": async (input, output: PermissionAskOutput) => {
       const requestInput = input as unknown as PermissionRequestLike
       if (requestInput.permission !== "bash") return
+      traceHook("permission.ask")
 
       const request = lookupRequest(requestInput)
       const decision = request.cached?.evaluation ?? (await safeEvaluate(request.command, request.cwd))
