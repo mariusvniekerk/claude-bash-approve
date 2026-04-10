@@ -123,14 +123,18 @@ func TestDeleteLegacyTelemetryFilesRemovesLegacyFilesAfterSuccess(t *testing.T) 
 	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(legacy, []byte("legacy"), 0o600); err != nil {
-		t.Fatal(err)
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		if err := os.WriteFile(legacy+suffix, []byte("legacy"+suffix), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := deleteLegacyTelemetryFiles(legacy); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(legacy); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("legacy still exists, err = %v", err)
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		if _, err := os.Stat(legacy + suffix); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("legacy%s still exists, err = %v", suffix, err)
+		}
 	}
 }
 
@@ -141,12 +145,24 @@ func TestCopyLegacyTelemetryFilesCleansPartialDestinationOnFailure(t *testing.T)
 	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(legacy, []byte("legacy"), 0o600); err != nil {
-		t.Fatal(err)
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		if err := os.WriteFile(legacy+suffix, []byte("legacy"+suffix), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
+
+	calls := 0
 	copyFile = func(src, dst string) error {
+		calls++
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return err
+		}
+		if calls < 3 {
+			data, err := os.ReadFile(src)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(dst, data, 0o600)
 		}
 		if err := os.WriteFile(dst, []byte("partial"), 0o600); err != nil {
 			return err
@@ -154,10 +170,13 @@ func TestCopyLegacyTelemetryFilesCleansPartialDestinationOnFailure(t *testing.T)
 		return errors.New("boom")
 	}
 	defer func() { copyFile = copyFileStdlib }()
+
 	if err := copyLegacyTelemetryFiles(legacy, dest); err == nil {
 		t.Fatal("expected copy error")
 	}
-	if _, err := os.Stat(dest); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("dest still exists, err = %v", err)
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if _, err := os.Stat(dest + suffix); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("dest%s still exists after rollback, err = %v", suffix, err)
+		}
 	}
 }
