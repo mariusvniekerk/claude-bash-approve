@@ -13,6 +13,13 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func closeTestDB(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+}
+
 func TestTelemetryDBPathUsesXDGStateHome(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", "/tmp/xdg-state")
 
@@ -319,7 +326,7 @@ func TestOpenTelemetryDBUsesExistingUsableDestinationEvenWhenLegacyExists(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { closeTestDB(t, db) }()
 	if _, err := db.Exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, command TEXT)`); err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +337,7 @@ func TestOpenTelemetryDBUsesExistingUsableDestinationEvenWhenLegacyExists(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer legacyDB.Close()
+	defer func() { closeTestDB(t, legacyDB) }()
 	if _, err := legacyDB.Exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, command TEXT)`); err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +353,7 @@ func TestOpenTelemetryDBUsesExistingUsableDestinationEvenWhenLegacyExists(t *tes
 	if opened == nil {
 		t.Fatal("expected db")
 	}
-	defer opened.Close()
+	defer func() { closeTestDB(t, opened) }()
 
 	var command string
 	if err := opened.QueryRow(`SELECT command FROM decisions LIMIT 1`).Scan(&command); err != nil {
@@ -369,7 +376,7 @@ func TestOpenTelemetryDBMigratesLegacyDatabaseBeforeOpening(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer legacyDB.Close()
+	defer func() { closeTestDB(t, legacyDB) }()
 	if _, err := legacyDB.Exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, command TEXT)`); err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +392,7 @@ func TestOpenTelemetryDBMigratesLegacyDatabaseBeforeOpening(t *testing.T) {
 	if opened == nil {
 		t.Fatal("expected db")
 	}
-	defer opened.Close()
+	defer func() { closeTestDB(t, opened) }()
 
 	var count int
 	if err := opened.QueryRow(`SELECT count(*) FROM decisions`).Scan(&count); err != nil {
@@ -415,7 +422,7 @@ func TestOpenTelemetryDBRetriesMigrationWhenDestinationInvalidAndLegacyExists(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer legacyDB.Close()
+	defer func() { closeTestDB(t, legacyDB) }()
 	if _, err := legacyDB.Exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, command TEXT)`); err != nil {
 		t.Fatal(err)
 	}
@@ -431,7 +438,7 @@ func TestOpenTelemetryDBRetriesMigrationWhenDestinationInvalidAndLegacyExists(t 
 	if opened == nil {
 		t.Fatal("expected db")
 	}
-	defer opened.Close()
+	defer func() { closeTestDB(t, opened) }()
 
 	var command string
 	if err := opened.QueryRow(`SELECT command FROM decisions LIMIT 1`).Scan(&command); err != nil {
@@ -454,7 +461,7 @@ func TestOpenTelemetryDBCreatesFreshDatabaseWhenLegacyPathUnavailable(t *testing
 	if opened == nil {
 		t.Fatal("expected fresh db")
 	}
-	defer opened.Close()
+	defer func() { closeTestDB(t, opened) }()
 }
 
 func TestOpenTelemetryDBCreatesFreshDatabaseWhenLegacyPathResolvesButFileIsMissing(t *testing.T) {
@@ -473,7 +480,7 @@ func TestOpenTelemetryDBCreatesFreshDatabaseWhenLegacyPathResolvesButFileIsMissi
 	if opened == nil {
 		t.Fatal("expected fresh db")
 	}
-	defer opened.Close()
+	defer func() { closeTestDB(t, opened) }()
 }
 
 func TestOpenTelemetryDBDisablesTelemetryWhenLegacyPathStatFails(t *testing.T) {
@@ -493,7 +500,7 @@ func TestOpenTelemetryDBDisablesTelemetryWhenLegacyPathStatFails(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", stateRoot)
 
 	if db := openTelemetryDB(); db != nil {
-		defer db.Close()
+		defer func() { closeTestDB(t, db) }()
 		t.Fatal("expected nil db")
 	}
 }
@@ -555,7 +562,7 @@ func TestOpenTelemetryDBTreatsDestinationCreatedDuringMigrationAsSuccess(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer legacyDB.Close()
+	defer func() { closeTestDB(t, legacyDB) }()
 	if _, err := legacyDB.Exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, command TEXT)`); err != nil {
 		t.Fatal(err)
 	}
@@ -572,7 +579,7 @@ func TestOpenTelemetryDBTreatsDestinationCreatedDuringMigrationAsSuccess(t *test
 			if err != nil {
 				return err
 			}
-			defer winner.Close()
+			defer func() { closeTestDB(t, winner) }()
 			if _, err := winner.Exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, command TEXT)`); err != nil {
 				return err
 			}
@@ -589,7 +596,7 @@ func TestOpenTelemetryDBTreatsDestinationCreatedDuringMigrationAsSuccess(t *test
 	if opened == nil {
 		t.Fatal("expected db")
 	}
-	defer opened.Close()
+	defer func() { closeTestDB(t, opened) }()
 
 	var command string
 	if err := opened.QueryRow(`SELECT command FROM decisions LIMIT 1`).Scan(&command); err != nil {
@@ -612,7 +619,7 @@ func TestOpenTelemetryDBContinuesWhenLegacyDeleteFailsAfterSuccessfulMigration(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer legacyDB.Close()
+	defer func() { closeTestDB(t, legacyDB) }()
 	if _, err := legacyDB.Exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, command TEXT)`); err != nil {
 		t.Fatal(err)
 	}
@@ -629,7 +636,7 @@ func TestOpenTelemetryDBContinuesWhenLegacyDeleteFailsAfterSuccessfulMigration(t
 	if opened == nil {
 		t.Fatal("expected db")
 	}
-	defer opened.Close()
+	defer func() { closeTestDB(t, opened) }()
 
 	var command string
 	if err := opened.QueryRow(`SELECT command FROM decisions LIMIT 1`).Scan(&command); err != nil {
