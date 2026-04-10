@@ -207,7 +207,7 @@ describe("BashApprovePlugin", () => {
     expect(replies).toHaveLength(0)
   })
 
-  test("uses the OpenCode client for permission replies instead of raw fetch", async () => {
+test("uses the OpenCode client for permission replies instead of raw fetch", async () => {
     const replies: Array<{ sessionID: string; requestID: string; reply: string }> = []
     globalThis.fetch = mock(async () => {
       throw new Error("plugin should not use raw fetch")
@@ -239,5 +239,31 @@ describe("BashApprovePlugin", () => {
     } as never)
 
     expect(replies).toEqual([{ sessionID: "session-1", requestID: "perm-1", reply: "once" }])
+  })
+
+  test("stays silent by default during bash evaluation", async () => {
+    const errorCalls: string[] = []
+    const originalConsoleError = console.error
+    console.error = (...args: unknown[]) => {
+      errorCalls.push(args.map(String).join(" "))
+    }
+
+    try {
+      const plugin = await BashApprovePlugin({
+        directory: "/repo",
+        client: createClient([]),
+        serverUrl: new URL("http://127.0.0.1:4096"),
+        $: createShell(fakeProc('{"decision":"allow"}'), []) as never,
+      } as never)
+
+      await plugin["tool.execute.before"]?.(
+        { tool: "bash", sessionID: "session-1", callID: "call-1" },
+        { args: { command: "git status", workdir: "/repo" } },
+      )
+    } finally {
+      console.error = originalConsoleError
+    }
+
+    expect(errorCalls).toEqual([])
   })
 })

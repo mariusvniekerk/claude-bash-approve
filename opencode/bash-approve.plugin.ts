@@ -38,6 +38,7 @@ type PermissionAskedEvent = {
 }
 
 const HOOK_TRACE_PREFIX = "[bash-approve-hook]"
+const DEBUG_HOOKS = process.env.BASH_APPROVE_DEBUG === "1"
 
 type BashApprovePluginInput = PluginInput & {
   $: NonNullable<PluginInput["$"]>
@@ -75,6 +76,7 @@ function parseDecision(stdout: string): Decision {
 }
 
 function traceHook(name: string) {
+  if (!DEBUG_HOOKS) return
   console.error(`${HOOK_TRACE_PREFIX} ${name}`)
 }
 
