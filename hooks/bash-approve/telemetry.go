@@ -21,6 +21,26 @@ func telemetryDBPath(homeDir func() (string, error)) (string, bool) {
 	return filepath.Join(home, ".local", "state", "claude-bash-approve", "telemetry.db"), true
 }
 
+func legacyTelemetryDBPath(executable func() (string, error)) (string, bool) {
+	exe, err := executable()
+	if err != nil || exe == "" {
+		return "", false
+	}
+
+	return filepath.Join(filepath.Dir(exe), "telemetry.db"), true
+}
+
+func sqliteFilesFor(base string) []string {
+	candidates := []string{base, base + "-wal", base + "-shm", base + "-journal"}
+	files := make([]string, 0, len(candidates))
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			files = append(files, path)
+		}
+	}
+	return files
+}
+
 // openTelemetryDB opens (or creates) telemetry.db next to the running executable.
 // Returns nil if anything goes wrong — telemetry must never break the hook.
 func openTelemetryDB() *sql.DB {

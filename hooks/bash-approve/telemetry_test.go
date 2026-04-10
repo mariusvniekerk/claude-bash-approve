@@ -2,8 +2,11 @@ package main
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestTelemetryDBPathUsesXDGStateHome(t *testing.T) {
@@ -55,4 +58,35 @@ func TestTelemetryDBPathReturnsFalseWhenHomeUnavailable(t *testing.T) {
 	if ok {
 		t.Fatal("expected missing telemetry path")
 	}
+}
+
+func TestLegacyTelemetryDBPathUsesExecutableDir(t *testing.T) {
+	path, ok := legacyTelemetryDBPath(func() (string, error) { return "/tmp/bin/approve-bash", nil })
+	if !ok {
+		t.Fatal("expected legacy path")
+	}
+	want := filepath.Join("/tmp/bin", "telemetry.db")
+	if path != want {
+		t.Fatalf("path = %q, want %q", path, want)
+	}
+}
+
+func TestLegacyTelemetryDBPathReturnsFalseWhenExecutableUnavailable(t *testing.T) {
+	_, ok := legacyTelemetryDBPath(func() (string, error) { return "", errors.New("boom") })
+	if ok {
+		t.Fatal("expected no legacy path")
+	}
+}
+
+func TestSQLiteSidecarsIncludesPresentFiles(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "telemetry.db")
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		if err := os.WriteFile(base+suffix, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := sqliteFilesFor(base)
+	want := []string{base, base + "-wal", base + "-shm", base + "-journal"}
+	assert.Equal(t, want, got)
 }
