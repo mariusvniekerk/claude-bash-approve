@@ -20,7 +20,6 @@ type ToolExecuteBeforeInput = Parameters<NonNullable<Hooks["tool.execute.before"
 type ToolExecuteBeforeOutput = Parameters<NonNullable<Hooks["tool.execute.before"]>>[1]
 type ToolExecuteAfterInput = Parameters<NonNullable<Hooks["tool.execute.after"]>>[0]
 type EventInput = Parameters<NonNullable<Hooks["event"]>>[0]
-type PermissionAskOutput = Parameters<NonNullable<Hooks["permission.ask"]>>[1]
 
 type PermissionRequestLike = {
   permission: string
@@ -46,6 +45,10 @@ type BashApprovePluginInput = PluginInput & {
 
 function requestKey(sessionID: string, callID: string) {
   return `${sessionID}:${callID}`
+}
+
+function sessionEntries(pending: Map<string, PendingRequest>, sessionID: string) {
+  return [...pending.entries()].filter(([key]) => key.startsWith(`${sessionID}:`))
 }
 
 function resolveCwd(directory: string, workdir: string | undefined) {
@@ -75,7 +78,7 @@ function traceHook(name: string) {
   console.error(`${HOOK_TRACE_PREFIX} ${name}`)
 }
 
-export const BashApprovePlugin = async ({ directory, serverUrl, $ }: BashApprovePluginInput): Promise<Hooks> => {
+export const BashApprovePlugin = async ({ client, directory, $ }: BashApprovePluginInput): Promise<Hooks> => {
   const pending = new Map<string, PendingRequest>()
 
   async function evaluate(command: string, cwd: string): Promise<Decision> {
@@ -101,30 +104,29 @@ export const BashApprovePlugin = async ({ directory, serverUrl, $ }: BashApprove
     }
   }
 
-  function lookupRequest(info: { sessionID: string; tool?: { callID: string }; patterns: string[] }) {
-    const cached = info.tool ? pending.get(requestKey(info.sessionID, info.tool.callID)) : undefined
-    return {
-      cached,
-      command: cached?.command ?? info.patterns.join(" && "),
-      cwd: cached?.cwd ?? directory,
+  function lookupRequest(info: { sessionID: string; tool?: { callID: string } }) {
+    if (info.tool) {
+      return pending.get(requestKey(info.sessionID, info.tool.callID))
     }
+
+    const candidates = sessionEntries(pending, info.sessionID)
+    if (candidates.length !== 1) return undefined
+    return candidates[0]?.[1]
   }
 
-  async function replyPermission(requestID: string, reply: PermissionReply, message?: string) {
-    const url = new URL(`/permission/${requestID}/reply`, serverUrl)
-    url.searchParams.set("directory", directory)
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
+  async function replyPermission(sessionID: string, requestID: string, reply: PermissionReply) {
+    await client.postSessionIdPermissionsPermissionId({
+      path: {
+        id: sessionID,
+        permissionID: requestID,
       },
-      body: JSON.stringify({ reply, ...(message ? { message } : {}) }),
+      query: {
+        directory,
+      },
+      body: {
+        response: reply,
+      },
     })
-
-    if (!response.ok) {
-      throw new Error(`permission reply failed: ${response.status} ${await response.text()}`)
-    }
   }
 
   return {
@@ -155,37 +157,17 @@ export const BashApprovePlugin = async ({ directory, serverUrl, $ }: BashApprove
       if (permissionEvent.properties.permission !== "bash") return
 
       const request = lookupRequest(permissionEvent.properties)
-      const decision = request.cached?.evaluation ?? (await safeEvaluate(request.command, request.cwd))
+      if (!request) return
+      const decision = request.evaluation
 
       if (decision.decision === "allow") {
-        await replyPermission(permissionEvent.properties.id, "once", decision.reason)
+        await replyPermission(permissionEvent.properties.sessionID, permissionEvent.properties.id, "once")
         return
       }
 
       if (decision.decision === "deny") {
-        await replyPermission(permissionEvent.properties.id, "reject", decision.reason)
+        await replyPermission(permissionEvent.properties.sessionID, permissionEvent.properties.id, "reject")
       }
-    },
-
-    "permission.ask": async (input, output: PermissionAskOutput) => {
-      const requestInput = input as unknown as PermissionRequestLike
-      if (requestInput.permission !== "bash") return
-      traceHook("permission.ask")
-
-      const request = lookupRequest(requestInput)
-      const decision = request.cached?.evaluation ?? (await safeEvaluate(request.command, request.cwd))
-
-      if (decision.decision === "allow") {
-        output.status = "allow"
-        return
-      }
-
-      if (decision.decision === "deny") {
-        output.status = "deny"
-        return
-      }
-
-      output.status = "ask"
     },
   }
 }

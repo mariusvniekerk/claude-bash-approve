@@ -1,7 +1,7 @@
 export type RunClassification =
   | "plugin-intercepted"
-  | "permission-hook-not-wired"
-  | "permission-hook-missing"
+  | "native-ask"
+  | "plugin-deferred"
   | "plugin-not-loaded"
   | "command-failed"
 
@@ -11,16 +11,14 @@ export type RunSummaryInput = {
   pluginReplied: boolean
   hooks: {
     toolExecuteBefore: boolean
-    permissionAsk: boolean
   }
   commandCompleted: boolean
 }
 
 export function classifyRun(input: RunSummaryInput): RunClassification {
   if (!input.hooks.toolExecuteBefore) return "plugin-not-loaded"
-  if (!input.hooks.permissionAsk) return "permission-hook-missing"
   if (input.pluginReplied) return "plugin-intercepted"
-  if (input.permissionAsked > 0) return "permission-hook-not-wired"
+  if (input.permissionAsked > 0) return "native-ask"
   if (!input.commandCompleted) return "command-failed"
-  return "plugin-intercepted"
+  return "plugin-deferred"
 }

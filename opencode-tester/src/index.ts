@@ -312,7 +312,6 @@ async function main() {
   const commandOutput = latestBashPart?.state.status === "completed" ? latestBashPart.state.output : undefined
   const hooks = {
     toolExecuteBefore: observedHook(server.lines, "tool.execute.before"),
-    permissionAsk: observedHook(server.lines, "permission.ask"),
   }
 
   const summary = {

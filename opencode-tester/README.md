@@ -32,4 +32,4 @@ The script prints a JSON summary including:
 - any typed `permission.asked` and `permission.replied` events
 - final `bash` tool part state
 - any session errors
-- a final classification such as `plugin-intercepted` or `permission-hook-not-wired`
+- a final classification such as `plugin-intercepted`, `native-ask`, or `plugin-not-loaded`

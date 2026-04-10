@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_HOOK_DIR="$REPO_DIR/hooks/bash-approve"
 PLUGIN_TEMPLATE="$REPO_DIR/opencode/bash-approve.plugin.ts"
 PROJECT_ROOT="$REPO_DIR"
@@ -48,6 +48,25 @@ render_plugin() {
     sed "s|__HOOK_PATH__|$escaped_hook|g" "$PLUGIN_TEMPLATE" > "$plugin_path"
 }
 
+require_jq() {
+    if command -v jq >/dev/null 2>&1; then
+        return
+    fi
+
+    echo "ERROR: jq is required to inspect or update existing OpenCode config files." >&2
+    exit 1
+}
+
+config_has_bash_ask() {
+    local config_file="$1"
+    jq -e '.permission.bash["*"] == "ask"' "$config_file" >/dev/null 2>&1
+}
+
+build_runtime_binary() {
+    local runtime_dir="$1"
+    (cd "$runtime_dir" && go build -buildvcs=false -o "$runtime_dir/approve-bash" .)
+}
+
 ensure_config() {
     local config_file="$1"
 
@@ -67,7 +86,9 @@ EOF
         return
     fi
 
-    if grep -Fq '"bash"' "$config_file" 2>/dev/null && grep -Fq '"ask"' "$config_file" 2>/dev/null; then
+    require_jq
+
+    if config_has_bash_ask "$config_file"; then
         echo "    Existing OpenCode config already mentions bash ask permissions; leaving it unchanged."
         return
     fi
@@ -78,11 +99,6 @@ EOF
     if [ "$FORCE" != true ]; then
         echo "    Re-run with --force to merge it automatically (requires jq)."
         return
-    fi
-
-    if ! command -v jq >/dev/null 2>&1; then
-        echo "ERROR: --force requires jq to merge into existing OpenCode config." >&2
-        exit 1
     fi
 
     cp "$config_file" "$config_file.bak"
@@ -120,27 +136,33 @@ install_global() {
     cp "$SOURCE_HOOK_DIR"/go.mod "$SOURCE_HOOK_DIR"/go.sum "$runtime_dir/"
     cp "$SOURCE_HOOK_DIR"/categories.yaml "$SOURCE_HOOK_DIR"/run-opencode-hook.sh "$runtime_dir/"
     chmod +x "$runtime_dir/run-opencode-hook.sh"
-    (cd "$runtime_dir" && go build -o "$runtime_dir/approve-bash" .)
+    build_runtime_binary "$runtime_dir"
     echo "    Installed runtime: $runtime_dir"
     render_plugin "$hook_path" "$plugin_path"
     echo "    Wrote plugin: $plugin_path"
     ensure_config "$config_file"
 }
 
-echo "==> Installing claude-bash-approve for OpenCode"
+main() {
+    echo "==> Installing claude-bash-approve for OpenCode"
 
-case "$MODE" in
-    project)
-        install_project
-        ;;
-    global)
-        install_global
-        ;;
-    both)
-        install_project
-        install_global
-        ;;
-esac
+    case "$MODE" in
+        project)
+            install_project
+            ;;
+        global)
+            install_global
+            ;;
+        both)
+            install_project
+            install_global
+            ;;
+    esac
 
-echo ""
-echo "==> Done. Restart OpenCode after installation."
+    echo ""
+    echo "==> Done. Restart OpenCode after installation."
+}
+
+if [[ "${CLAUDE_BASH_APPROVE_INSTALL_LIB:-0}" != "1" ]]; then
+    main
+fi
