@@ -167,10 +167,17 @@ See `categories.yaml` for the full reference with examples.
 
 ## Telemetry
 
-Every decision is logged to a local SQLite database (`telemetry.db`, next to the binary). With the install script deployment model, this lives at `~/.claude/hooks/bash-approve/telemetry.db`. This lets you review what the hook approved, denied, or passed through:
+Every decision is logged to a local SQLite database in the user state directory. If `XDG_STATE_HOME` is set to an absolute path, the database lives at `$XDG_STATE_HOME/claude-bash-approve/telemetry.db`; otherwise it defaults to `~/.local/state/claude-bash-approve/telemetry.db`.
+
+On first run, the hook also performs a one-time migration from the common legacy path `~/.claude/hooks/bash-approve/telemetry.db` when that file exists. This lets you review what the hook approved, denied, or passed through:
 
 ```bash
-sqlite3 ~/.claude/hooks/bash-approve/telemetry.db "SELECT ts, decision, command, reason FROM decisions ORDER BY ts DESC LIMIT 20"
+state_home="${XDG_STATE_HOME}"
+if [ -z "$state_home" ] || [ "${state_home#/}" = "$state_home" ]; then
+  state_home="$HOME/.local/state"
+fi
+sqlite3 "$state_home/claude-bash-approve/telemetry.db" \
+  "SELECT ts, decision, command, reason FROM decisions ORDER BY ts DESC LIMIT 20"
 ```
 
 Telemetry is best-effort — if the database can't be opened or written to, the hook continues normally.

@@ -11,11 +11,12 @@ Query the bash-approve hook's decision log to find approval candidates and analy
 
 ## Database Location
 
-```
-~/.claude/hooks/bash-approve/telemetry.db
-```
+Telemetry is stored in the user state directory:
 
-The database is a SQLite file created next to the compiled `approve-bash` binary. The path is resolved via `os.Executable()` in `telemetry.go`.
+- If `XDG_STATE_HOME` is set to an absolute path, use `$XDG_STATE_HOME/claude-bash-approve/telemetry.db`
+- Otherwise, use `~/.local/state/claude-bash-approve/telemetry.db`
+
+There is also legacy compatibility for the common old path `~/.claude/hooks/bash-approve/telemetry.db`: the hook attempts a one-time migration from that location. If migration succeeds but legacy cleanup fails, the new state-directory path is still authoritative.
 
 ## Schema
 
@@ -43,7 +44,17 @@ Priority when merging chain/multiline decisions: **deny > ask > no-opinion > all
 
 ## Quick Reference Queries
 
-All queries use `sqlite3 ~/.claude/hooks/bash-approve/telemetry.db`.
+Before running queries, resolve the telemetry database path like this:
+
+```bash
+state_home="${XDG_STATE_HOME}"
+if [ -z "$state_home" ] || [ "${state_home#/}" = "$state_home" ]; then
+  state_home="$HOME/.local/state"
+fi
+db_path="$state_home/claude-bash-approve/telemetry.db"
+```
+
+Run queries with `sqlite3 "$db_path" '...SQL...'`.
 
 ### Summary of recent decisions (past 7 days)
 
@@ -104,7 +115,7 @@ The best candidates for new auto-approve rules are commands that:
 3. Add a new pattern in the bash-approve source repo's `rules.go` under `allCommandPatterns`
 4. Or, if an existing pattern is in `disabled` in `categories.yaml`, move it to `enabled`
 
-**Source code** is at `~/code/agent-skills/hooks/bash-approve/` — edits go here, not in `~/.claude/hooks/bash-approve/` (that's the deployed copy with compiled binary).
+**Source code** is at `~/code/agent-skills/hooks/bash-approve/` — edits go here, not in `~/.claude/hooks/bash-approve/` (that's the deployed hook bundle).
 
 **Four decision types for new patterns:**
 - `allow` (default) — auto-approve silently
@@ -135,4 +146,5 @@ Fine-grained category names match the first tag in each pattern's `tags()` call 
 
 - **Timestamps are UTC** — adjust when comparing to local time.
 - **`no-opinion` vs `ask`** — `no-opinion` means either no rule matched or a rule matched with `WithDecision("")` (deferred to next hook). `ask` means a rule matched with `WithDecision("ask")` and the user will always be prompted (terminal). New rules fix unmatched no-opinion; `ask` is intentional.
-- **Database path** — it lives next to the compiled binary, not the source. If you recompile to a different location, a new empty db is created.
+- **Database path** — only use `$XDG_STATE_HOME/claude-bash-approve/telemetry.db` when `XDG_STATE_HOME` is an absolute path. Otherwise use `~/.local/state/claude-bash-approve/telemetry.db`.
+- **Legacy files** — `~/.claude/hooks/bash-approve/telemetry.db` is a compatibility/migration source, not the authoritative location after migration. Even if legacy cleanup fails, query the state-directory database.
