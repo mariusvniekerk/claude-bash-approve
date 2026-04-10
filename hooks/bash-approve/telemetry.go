@@ -188,6 +188,11 @@ func copyLegacyTelemetryFiles(legacyPath, destPath string) error {
 		if err := renameFile(tempPath, dst); err != nil {
 			if errors.Is(err, os.ErrExist) {
 				cleanupFiles([]string{tempPath})
+				if copied[len(copied)-1].backup != "" {
+					if restoreErr := renameFile(copied[len(copied)-1].backup, copied[len(copied)-1].dst); restoreErr == nil {
+						copied[len(copied)-1].backup = ""
+					}
+				}
 				return err
 			}
 			rollbackCopiedTelemetryFiles(copied)
@@ -213,6 +218,7 @@ func resetTelemetryTestHooks() {
 	telemetryHomeDir = os.UserHomeDir
 	telemetryExecutable = os.Executable
 	copyFile = copyFileStdlib
+	renameFile = os.Rename
 	deleteLegacyFiles = deleteLegacyTelemetryFiles
 }
 
