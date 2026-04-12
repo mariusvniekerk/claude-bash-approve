@@ -1,5 +1,34 @@
 declare module "@mariozechner/pi-coding-agent" {
+  export type ExtensionContext = {
+    cwd: string;
+    hasUI: boolean;
+    ui: {
+      confirm(title: string, message: string): Promise<boolean>;
+      notify(message: string, type?: "info" | "warning" | "error"): void;
+    };
+    signal?: AbortSignal;
+  };
+
+  export type ToolCallEvent = {
+    type: "tool_call";
+    toolCallId: string;
+    toolName: string;
+    input: Record<string, unknown>;
+  };
+
+  export type ToolCallEventResult = {
+    block?: boolean;
+    reason?: string;
+  };
+
   export type ExtensionAPI = {
+    on(
+      event: "tool_call",
+      handler: (
+        event: ToolCallEvent,
+        ctx: ExtensionContext,
+      ) => Promise<ToolCallEventResult | undefined> | ToolCallEventResult | undefined,
+    ): void;
     registerTool(tool: any): void;
     registerCommand(name: string, options: {
       description: string;

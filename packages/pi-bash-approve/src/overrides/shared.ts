@@ -14,6 +14,18 @@ export type ProtectedToolContext = {
   };
 };
 
+export type ProtectedToolAccessResult =
+  | { kind: "execute" }
+  | { kind: "block"; reason: string };
+
+type ProtectedToolAccessInput = {
+  runtimeInput: PiRuntimeInput;
+  ctx: ProtectedToolContext;
+  config: PiBashApproveConfig;
+  runtimePath?: string;
+  runRuntime(runtimePath: string, input: PiRuntimeInput, configPath?: string): Promise<PiRuntimeOutput>;
+};
+
 /**
  * Centralize the policy handoff so every protected built-in tool shares the same fail-closed rules.
  *
@@ -30,11 +42,26 @@ export async function adjudicateAndExecute<T>(input: {
   runRuntime(runtimePath: string, input: PiRuntimeInput, configPath?: string): Promise<PiRuntimeOutput>;
   builtInExecute(): Promise<T>;
 }): Promise<T> {
+  const decision = await adjudicateToolAccess(input);
+  if (decision.kind === "block") {
+    throw new PolicyBlockError(decision.reason);
+  }
+  return input.builtInExecute();
+}
+
+/**
+ * Evaluate whether a protected tool call may proceed before any built-in execution happens.
+ *
+ * The override implementation uses this to decide whether to run the original tool, and the newer
+ * `tool_call` hook path uses the same logic to block conflicting extensions without replacing pi's
+ * built-in tools.
+ */
+export async function adjudicateToolAccess(input: ProtectedToolAccessInput): Promise<ProtectedToolAccessResult> {
   if (input.config.enabled === false) {
-    return input.builtInExecute();
+    return { kind: "execute" };
   }
   if (!input.runtimePath) {
-    throw new PolicyBlockError("protected runtime is unavailable");
+    return { kind: "block", reason: "protected runtime is unavailable" };
   }
   const runtimePath = input.runtimePath;
 
@@ -42,20 +69,20 @@ export async function adjudicateAndExecute<T>(input: {
     const output = await input.runRuntime(runtimePath, input.runtimeInput, input.config.categoriesPath);
     const action = normalizeDecision(output, { hasUI: input.ctx.hasUI });
     if (action.kind === "block") {
-      throw new PolicyBlockError("blocked by policy");
+      return { kind: "block", reason: decisionReason(output, "blocked by policy") ?? "blocked by policy" };
     }
     if (action.kind === "prompt") {
       if (!input.ctx.hasUI || !input.ctx.ui) {
-        throw new PolicyBlockError("approval required but no UI is available");
+        return { kind: "block", reason: "approval required but no UI is available" };
       }
-      const reason = output.kind === "decision" ? output.reason : output.error.message;
+      const reason = decisionReason(output);
       const prompt = buildApprovalPrompt(input.runtimeInput, input.ctx.cwd, reason);
       const confirmed = await input.ctx.ui.confirm(prompt.title, prompt.message);
       if (!confirmed) {
-        throw new PolicyBlockError("blocked by user");
+        return { kind: "block", reason: "blocked by user" };
       }
     }
-    return input.builtInExecute();
+    return { kind: "execute" };
   });
 }
 
@@ -74,6 +101,13 @@ function buildApprovalPrompt(input: PiRuntimeInput, cwd: string, reason?: string
     title: "Allow out-of-bounds tool access?",
     message: buildPathPrompt(input.tool, pathLabel(input), cwd, reason),
   };
+}
+
+function decisionReason(output: PiRuntimeOutput, fallback?: string): string | undefined {
+  if (output.kind === "decision") {
+    return output.reason ?? fallback;
+  }
+  return output.error.message || fallback;
 }
 
 function pathLabel(input: PiRuntimeInput): string {
