@@ -3,11 +3,14 @@ import type { PiBashApproveConfig } from "../config";
 import { adjudicateAndExecute, type ProtectedToolContext } from "./shared";
 import { runRuntime } from "../runtime-client";
 
-export function createProtectedFindTool(runtimePath: string, config: PiBashApproveConfig) {
+type Resolver = (ctx: ProtectedToolContext) => Promise<{ runtimePath: string; config: PiBashApproveConfig }>;
+
+export function createProtectedFindTool(resolveExecution: Resolver) {
   const template = createFindTool(process.cwd());
   return {
     ...template,
     async execute(id: string, params: { pattern: string; path?: string }, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ProtectedToolContext) {
+      const { runtimePath, config } = await resolveExecution(ctx);
       return adjudicateAndExecute({
         toolName: "find",
         runtimeInput: { tool: "find", pattern: params.pattern, path: params.path, cwd: ctx.cwd },

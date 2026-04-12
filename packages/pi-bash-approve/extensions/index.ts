@@ -14,8 +14,8 @@ export default function (pi: ExtensionAPI) {
   const bundledRuntimePath = path.join(packageDir, "runtime", "run-pi-runtime.sh");
   const repoLocalRuntimePath = path.join(repoRoot, "hooks", "bash-approve", "run-hook.sh");
 
-  const register = async () => {
-    const config = await resolveConfig({ cwd: process.cwd() });
+  const resolveExecution = async (ctx: { cwd: string }) => {
+    const config = await resolveConfig({ cwd: ctx.cwd });
     const runtimePath = chooseRuntimePath({
       packageDir,
       repoRoot,
@@ -23,12 +23,12 @@ export default function (pi: ExtensionAPI) {
       bundledRuntimePath,
       repoLocalRuntimePath,
     });
-    pi.registerTool(createProtectedBashTool(runtimePath, config));
-    pi.registerTool(createProtectedReadTool(runtimePath, config));
-    pi.registerTool(createProtectedGrepTool(runtimePath, config));
-    pi.registerTool(createProtectedFindTool(runtimePath, config));
-    pi.registerTool(createProtectedLsTool(runtimePath, config));
+    return { runtimePath, config };
   };
 
-  void register();
+  pi.registerTool(createProtectedBashTool(resolveExecution));
+  pi.registerTool(createProtectedReadTool(resolveExecution));
+  pi.registerTool(createProtectedGrepTool(resolveExecution));
+  pi.registerTool(createProtectedFindTool(resolveExecution));
+  pi.registerTool(createProtectedLsTool(resolveExecution));
 }
