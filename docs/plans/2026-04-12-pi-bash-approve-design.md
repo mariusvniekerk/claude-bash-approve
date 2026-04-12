@@ -389,9 +389,20 @@ A reusable pi package cannot rely on being run only from this repository checkou
 ### Recommended runtime resolution precedence
 
 1. explicit package config `runtimePath`
-2. bundled runtime inside the installed pi package
-3. repo-local development path when running from this checkout
+2. repo-local development path when running from this repository checkout
+3. bundled runtime inside the installed pi package
 4. otherwise fail clearly
+
+### Development-safety requirement
+
+When the package is being run from this source repository, local development must prefer the live repo-local runtime over staged package assets. The package must not silently execute a stale synced copy from `packages/pi-bash-approve/runtime/` when a newer source-of-truth implementation exists under `hooks/bash-approve/`.
+
+Two acceptable strategies were considered:
+
+- auto-detect the source checkout and prefer the repo-local runtime
+- require an explicit development override such as `runtimePath`
+
+For v1, the recommended behavior is **automatic repo-local preference** when the current package is running from this repository checkout. That keeps local verification aligned with the stated source-of-truth model and reduces the chance of validating stale staged assets by accident.
 
 ### Why this matters
 
@@ -620,9 +631,23 @@ Single package entrypoint.
 
 Responsibilities:
 - register all protected-tool overrides
-- load package config once per session start / extension load
-- create any shared queue or runtime client dependencies
+- create shared queue and config/runtime resolver dependencies
+- ensure config is resolved against a stable project/worktree root rather than raw transient cwd
+- define when config is refreshed as cwd/project context changes
 - avoid owning policy logic directly
+
+### Config refresh / cwd-change requirement
+
+The package must not assume that a single config snapshot loaded at extension start is valid forever. Pi sessions can move across directories or start from a subdirectory, and protected-tool decisions are cwd-sensitive.
+
+Therefore, v1 should define config resolution in terms of the **effective repo/worktree root for the current execution context**:
+
+- for each protected tool execution, determine the current repo/worktree root from `ctx.cwd`
+- resolve project config relative to that stable root
+- reuse cached config only when the effective root is unchanged
+- invalidate/reload when the effective root changes
+
+This prevents one project's `enabled`, `runtimePath`, or `categoriesPath` settings from bleeding into another project's executions.
 
 #### `src/runtime-contract.ts`
 Pure TypeScript type definitions for the `--pi` stdin/stdout contract.
@@ -776,9 +801,22 @@ Keep v1 config intentionally small.
 ### Proposed config file locations
 
 - global: `~/.pi/agent/bash-approve.json`
-- project-local: `<cwd>/.pi/bash-approve.json`
+- project-local: `<repo-or-worktree-root>/.pi/bash-approve.json`
 
-This mirrors the style used by the pi sandbox example and keeps configuration discoverable without introducing a large package-specific settings system.
+Project config must be resolved from a stable project boundary, not from the raw current cwd string. The adapter should determine the effective repo/worktree root for `ctx.cwd` and then look for `.pi/bash-approve.json` at that root.
+
+If `ctx.cwd` is not inside a git repo/worktree, the adapter should either:
+- walk upward looking for a project-local `.pi/bash-approve.json`, or
+- fall back directly to global config when no stable project root can be established
+
+For v1, the recommended behavior is:
+
+1. determine repo/worktree root for `ctx.cwd` when possible
+2. if found, use `<root>/.pi/bash-approve.json`
+3. if not found, walk upward from `ctx.cwd` to filesystem root looking for `.pi/bash-approve.json`
+4. if still not found, use global config
+
+This keeps repo-scoped policy stable when pi starts in a subdirectory and avoids missing a root-level config file.
 
 ### Proposed config shape
 
@@ -795,15 +833,25 @@ export type PiBashApproveConfig = {
 
 - `enabled`: `true`
 - `serializeProtectedToolExecutions`: `true`
-- `runtimePath`: runtime shim bundled with the package unless explicitly overridden
-- `categoriesPath`: use explicit override if present, else bundled/runtime-local `categories.yaml`
+- `runtimePath`: use explicit override if present; otherwise prefer repo-local runtime in this source checkout, else use the bundled package runtime
+- `categoriesPath`: use explicit override if present, else runtime-local `categories.yaml`
 
 ### Config precedence
 
 1. explicit runtime/package override passed from extension code (if ever needed for tests)
-2. project config
+2. project config resolved from the effective repo/worktree root (or upward walk fallback when no repo root exists)
 3. global config
 4. package defaults
+
+### Cache key for config reuse
+
+If config caching is used for performance, the cache key must include the effective project boundary rather than only the raw cwd. For v1, the safest cache key is:
+
+- resolved repo/worktree root when available
+- otherwise the directory containing the discovered project-local config file
+- otherwise a sentinel representing "global-only"
+
+That ensures cached configuration does not leak across unrelated directories or repositories.
 
 ### Config edge cases
 
@@ -1002,6 +1050,7 @@ Expected flow:
 - package brings its own staged runtime bundle
 - runtime shim compiles on first use if needed
 - protected tools are available without needing a sibling repo checkout
+- runtime resolution falls back to the bundled runtime only when no explicit override and no repo-local source checkout runtime is in effect
 
 ### Runtime dependency requirement
 
@@ -1126,6 +1175,13 @@ Likely implementation touchpoints once work is planned:
 - collapsing Claude, OpenCode, and pi adapter contracts into one shared output format
 - building a generalized policy system for all pi built-in tools before there is a demonstrated need
 - inventing path-pattern semantics for `find` / `ls` beyond repo/worktree boundary checks
+
+## Review-Driven Adjustments Incorporated
+
+This draft was updated after automated review to tighten two previously underspecified areas:
+
+1. **Config scoping:** project-local config is now defined relative to a stable repo/worktree root (with an upward-walk fallback when no repo root exists), and config reuse must be invalidated when the effective project boundary changes.
+2. **Development runtime resolution:** local development in this source checkout must prefer the repo-local runtime over staged package assets so validation does not silently target stale synced runtime code.
 
 ## Design Status Summary
 
