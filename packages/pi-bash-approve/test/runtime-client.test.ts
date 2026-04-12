@@ -14,7 +14,7 @@ test("prefers repo-local runtime in source checkout", () => {
     repoRoot: "/repo",
     explicitRuntimePath: undefined,
     bundledRuntimePath: "/repo/packages/pi-bash-approve/runtime/run-pi-runtime.sh",
-    repoLocalRuntimePath: "/repo/hooks/bash-approve/run-hook.sh",
+    repoLocalRuntimePath: "/repo/hooks/bash-approve/run-pi-runtime.sh",
   });
-  expect(chosen).toBe("/repo/hooks/bash-approve/run-hook.sh");
+  expect(chosen).toBe("/repo/hooks/bash-approve/run-pi-runtime.sh");
 });

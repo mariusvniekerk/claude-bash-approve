@@ -1,6 +1,10 @@
 declare module "@mariozechner/pi-coding-agent" {
   export type ExtensionAPI = {
     registerTool(tool: any): void;
+    registerCommand(name: string, options: {
+      description: string;
+      handler(args: string, ctx: any): Promise<void> | void;
+    }): void;
   };
 
   export function createBashTool(cwd: string): any;
