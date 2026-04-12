@@ -37,6 +37,28 @@ func evaluateGrepTool(input GrepInput, ctx evalContext) *result {
 	return approved("grep")
 }
 
+func evaluateFindTool(input PiInput, ctx evalContext) *result {
+	target := input.Path
+	if target == "" {
+		target = "."
+	}
+	if pathInCurrentRepoFamily(ctx.cwd, target) {
+		return approved("find")
+	}
+	return &result{reason: "find", decision: ""}
+}
+
+func evaluateLsTool(input PiInput, ctx evalContext) *result {
+	target := input.Path
+	if target == "" {
+		target = "."
+	}
+	if pathInCurrentRepoFamily(ctx.cwd, target) {
+		return approved("ls")
+	}
+	return &result{reason: "ls", decision: ""}
+}
+
 func isCurrentRepoWorktreeCD(args []*syntax.Word, ctx evalContext) bool {
 	if ctx.cwd == "" || len(args) != 2 {
 		return false
@@ -128,6 +150,48 @@ func pathInCurrentRepo(cwd, target string) bool {
 	}
 
 	rel, err := filepath.Rel(repoRoot, resolvedTarget)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+func pathInCurrentRepoFamily(cwd, target string) bool {
+	if pathInCurrentRepo(cwd, target) {
+		return true
+	}
+	if cwd == "" || target == "" {
+		return false
+	}
+
+	resolvedTarget, err := resolvePathFromCwd(cwd, target)
+	if err != nil {
+		return false
+	}
+
+	currentCommonDir, err := gitResolvedPath(cwd, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return false
+	}
+
+	probeDir := resolvedTarget
+	if info, statErr := os.Stat(resolvedTarget); statErr == nil && !info.IsDir() {
+		probeDir = filepath.Dir(resolvedTarget)
+	}
+
+	targetTopLevel, err := gitResolvedPath(probeDir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return false
+	}
+	targetCommonDir, err := gitResolvedPath(probeDir, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return false
+	}
+	if currentCommonDir != targetCommonDir {
+		return false
+	}
+
+	rel, err := filepath.Rel(targetTopLevel, resolvedTarget)
 	if err != nil {
 		return false
 	}

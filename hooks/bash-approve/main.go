@@ -60,6 +60,29 @@ type OpenCodeOutput struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
+type PiInput struct {
+	Tool    string   `json:"tool"`
+	Command string   `json:"command,omitempty"`
+	Path    string   `json:"path,omitempty"`
+	Paths   []string `json:"paths,omitempty"`
+	Pattern string   `json:"pattern,omitempty"`
+	Cwd     string   `json:"cwd"`
+}
+
+type PiError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type PiOutput struct {
+	Version  int      `json:"version"`
+	Kind     string   `json:"kind"`
+	Tool     string   `json:"tool,omitempty"`
+	Decision string   `json:"decision,omitempty"`
+	Reason   string   `json:"reason,omitempty"`
+	Error    *PiError `json:"error,omitempty"`
+}
+
 type HookOutput struct {
 	HookSpecificOutput HookDecision `json:"hookSpecificOutput"`
 }
@@ -136,6 +159,21 @@ func loadConfigFromPath(path string) (Config, error) {
 	return cfg, nil
 }
 
+func loadExplicitConfigFromPath(path string) (Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Config{}, fmt.Errorf("cannot read config %s", path)
+	}
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return Config{}, fmt.Errorf("cannot parse config %s: %w", path, err)
+	}
+	if cfg.Enabled == nil {
+		cfg.Enabled = []string{"all"}
+	}
+	return cfg, nil
+}
+
 // isEnabled checks whether a pattern is enabled given its tags and pre-built sets.
 // Tags are checked most-specific-first (tags[0], tags[1], ..., then "all").
 // A disabled tag at any level overrides an enabled tag at a broader level.
@@ -201,6 +239,23 @@ func emitOpenCodeOutput(out OpenCodeOutput) {
 	b, _ := json.Marshal(out)
 	fmt.Println(string(b))
 	os.Exit(0)
+}
+
+func emitPiOutput(out PiOutput) {
+	b, _ := json.Marshal(out)
+	fmt.Println(string(b))
+	os.Exit(0)
+}
+
+func buildPiErrorOutput(code, message string) PiOutput {
+	return PiOutput{
+		Version: 1,
+		Kind:    "error",
+		Error: &PiError{
+			Code:    code,
+			Message: message,
+		},
+	}
 }
 
 // argsText prints CallExpr args to a flat string for regex matching.
@@ -667,6 +722,50 @@ func evaluateOpenCodeToolUse(input OpenCodeInput, cfg Config) (string, *result) 
 	return input.Command, Evaluate(input.Command, cfg, evalContext{cwd: input.Cwd})
 }
 
+func evaluatePiToolUse(input PiInput, cfg Config) (string, *result, error) {
+	ctx := evalContext{cwd: input.Cwd}
+	if input.Cwd == "" {
+		return "", nil, fmt.Errorf("cwd is required")
+	}
+
+	switch input.Tool {
+	case "bash":
+		if input.Command == "" {
+			return "", nil, fmt.Errorf("command is required")
+		}
+		return input.Command, Evaluate(input.Command, cfg, ctx), nil
+	case "read":
+		if input.Path == "" {
+			return "", nil, fmt.Errorf("path is required")
+		}
+		return input.Path, evaluateReadTool(ReadInput{FilePath: input.Path}, ctx), nil
+	case "grep":
+		grepInput := GrepInput{Pattern: input.Pattern, Path: input.Path, Paths: input.Paths}
+		return grepCommandLabel(grepInput), evaluateGrepTool(grepInput, ctx), nil
+	case "find":
+		return input.Path, evaluateFindTool(input, ctx), nil
+	case "ls":
+		return input.Path, evaluateLsTool(input, ctx), nil
+	default:
+		return "", nil, fmt.Errorf("unsupported tool: %s", input.Tool)
+	}
+}
+
+func buildPiOutput(tool string, r *result) PiOutput {
+	if r == nil {
+		return PiOutput{Version: 1, Kind: "decision", Tool: tool, Decision: "noop"}
+	}
+	reason := r.reason
+	if r.decision == decisionDeny && r.denyReason != "" {
+		reason = r.denyReason
+	}
+	decision := r.decision
+	if decision == "" {
+		decision = "noop"
+	}
+	return PiOutput{Version: 1, Kind: "decision", Tool: tool, Decision: decision, Reason: reason}
+}
+
 func buildOpenCodeOutput(r *result) OpenCodeOutput {
 	if r == nil {
 		return OpenCodeOutput{Decision: "noop"}
@@ -695,6 +794,19 @@ func isOpenCodeMode() bool {
 	return len(os.Args) > 1 && os.Args[1] == "--opencode"
 }
 
+func isPiMode() bool {
+	return len(os.Args) > 1 && os.Args[1] == "--pi"
+}
+
+func configPathArg() string {
+	for i := 1; i < len(os.Args); i++ {
+		if os.Args[i] == "--config" && i+1 < len(os.Args) {
+			return os.Args[i+1]
+		}
+	}
+	return ""
+}
+
 func main() {
 	rawInput, err := io.ReadAll(os.Stdin)
 	if err != nil {
@@ -713,13 +825,43 @@ func main() {
 
 	payload := string(rawInput)
 
-	cfg, err := loadConfig()
+	var cfg Config
+	configPath := configPathArg()
+	if configPath != "" {
+		cfg, err = loadExplicitConfigFromPath(configPath)
+	} else {
+		cfg, err = loadConfig()
+	}
 	if err != nil {
 		logDecision(db, payload, "", decisionDeny, err.Error())
+		if isPiMode() {
+			emitPiOutput(buildPiErrorOutput("config-error", err.Error()))
+		}
 		if isOpenCodeMode() {
 			emitOpenCodeOutput(OpenCodeOutput{Decision: decisionDeny, Reason: err.Error()})
 		}
 		emitDecision(decisionDeny, err.Error())
+	}
+
+	if isPiMode() {
+		var data PiInput
+		if err := json.Unmarshal(rawInput, &data); err != nil {
+			logDecision(db, payload, "", "error", "invalid pi input")
+			emitPiOutput(buildPiErrorOutput("invalid-input", "invalid pi input"))
+		}
+
+		cmd, r, err := evaluatePiToolUse(data, cfg)
+		if err != nil {
+			code := "invalid-input"
+			if strings.HasPrefix(err.Error(), "unsupported tool:") {
+				code = "unsupported-tool"
+			}
+			logDecision(db, payload, cmd, "error", err.Error())
+			emitPiOutput(buildPiErrorOutput(code, err.Error()))
+		}
+		out := buildPiOutput(data.Tool, r)
+		logDecision(db, payload, cmd, out.Decision, out.Reason)
+		emitPiOutput(out)
 	}
 
 	if isOpenCodeMode() {
