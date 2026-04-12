@@ -41,6 +41,8 @@ Protected executions are serialized internally by default; that is not currently
 
 ## Runtime
 
-The package ships a staged runtime bundle under `runtime/`. During local development in this source checkout, runtime resolution prefers the live Go sources under `hooks/bash-approve/` over the staged package bundle.
+For source-tree, local-path, and git installs, the extension resolves the runtime from the same installed repository checkout under `hooks/bash-approve/run-pi-runtime.sh`.
 
-Go is currently required to build the staged runtime on first use.
+That keeps `hooks/bash-approve/` as the single source of truth instead of maintaining a duplicated Go runtime tree under the package itself.
+
+Go is currently required to build the runtime on first use.

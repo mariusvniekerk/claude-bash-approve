@@ -4,7 +4,7 @@ The reusable pi package talks to the Go runtime through a dedicated `--pi` JSON 
 
 ## Invocation
 
-The staged runtime shim ultimately runs:
+The pi runtime shim ultimately runs:
 
 ```bash
 approve-bash --pi [--config /path/to/categories.yaml]

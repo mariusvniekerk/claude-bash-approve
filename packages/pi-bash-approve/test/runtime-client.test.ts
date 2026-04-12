@@ -1,20 +1,51 @@
-import { access } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { test, expect } from "bun:test";
 import { chooseRuntimePath } from "../src/runtime-client";
 
-test("runtime shim exists in staged package runtime", async () => {
-  const shim = path.resolve(import.meta.dir, "../runtime/run-pi-runtime.sh");
-  await access(shim);
+test("prefers repo-local runtime when present", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "pi-runtime-path-"));
+  const packageDir = path.join(tempRoot, "packages", "pi-bash-approve");
+  const repoLocalRuntimePath = path.join(tempRoot, "hooks", "bash-approve", "run-pi-runtime.sh");
+  const bundledRuntimePath = path.join(packageDir, "runtime", "run-pi-runtime.sh");
+  await mkdir(path.dirname(repoLocalRuntimePath), { recursive: true });
+  await mkdir(path.dirname(bundledRuntimePath), { recursive: true });
+  await writeFile(repoLocalRuntimePath, "", "utf8");
+  await writeFile(bundledRuntimePath, "", "utf8");
+
+  try {
+    const chosen = chooseRuntimePath({
+      packageDir,
+      repoRoot: tempRoot,
+      explicitRuntimePath: undefined,
+      bundledRuntimePath,
+      repoLocalRuntimePath,
+    });
+    expect(chosen).toBe(repoLocalRuntimePath);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
 });
 
-test("prefers repo-local runtime in source checkout", () => {
-  const chosen = chooseRuntimePath({
-    packageDir: "/repo/packages/pi-bash-approve",
-    repoRoot: "/repo",
-    explicitRuntimePath: undefined,
-    bundledRuntimePath: "/repo/packages/pi-bash-approve/runtime/run-pi-runtime.sh",
-    repoLocalRuntimePath: "/repo/hooks/bash-approve/run-pi-runtime.sh",
-  });
-  expect(chosen).toBe("/repo/hooks/bash-approve/run-pi-runtime.sh");
+test("falls back to bundled runtime when repo-local runtime is absent", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "pi-runtime-path-"));
+  const packageDir = path.join(tempRoot, "packages", "pi-bash-approve");
+  const repoLocalRuntimePath = path.join(tempRoot, "hooks", "bash-approve", "run-pi-runtime.sh");
+  const bundledRuntimePath = path.join(packageDir, "runtime", "run-pi-runtime.sh");
+  await mkdir(path.dirname(bundledRuntimePath), { recursive: true });
+  await writeFile(bundledRuntimePath, "", "utf8");
+
+  try {
+    const chosen = chooseRuntimePath({
+      packageDir,
+      repoRoot: tempRoot,
+      explicitRuntimePath: undefined,
+      bundledRuntimePath,
+      repoLocalRuntimePath,
+    });
+    expect(chosen).toBe(bundledRuntimePath);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
 });

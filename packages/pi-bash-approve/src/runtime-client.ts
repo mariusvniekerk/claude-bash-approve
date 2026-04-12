@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { RuntimeInvocationError } from "./errors";
 import { parseRuntimeOutput } from "./runtime-parse";
@@ -12,7 +13,11 @@ export function chooseRuntimePath(input: {
   repoLocalRuntimePath: string;
 }) {
   if (input.explicitRuntimePath) return input.explicitRuntimePath;
-  if (input.repoRoot && path.resolve(input.packageDir).startsWith(path.resolve(input.repoRoot))) {
+  if (
+    input.repoRoot &&
+    path.resolve(input.packageDir).startsWith(path.resolve(input.repoRoot)) &&
+    existsSync(input.repoLocalRuntimePath)
+  ) {
     return input.repoLocalRuntimePath;
   }
   return input.bundledRuntimePath;

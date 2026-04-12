@@ -594,12 +594,6 @@ packages/pi-bash-approve/
 ├── README.md
 ├── extensions/
 │   └── index.ts
-├── runtime/
-│   ├── run-pi-runtime.sh
-│   ├── go.mod
-│   ├── go.sum
-│   ├── categories.yaml
-│   └── *.go
 ├── src/
 │   ├── config.ts
 │   ├── runtime-contract.ts
@@ -869,68 +863,36 @@ That ensures cached configuration does not leak across unrelated directories or 
 
 ## Runtime Build / Bundle Strategy
 
-A reusable pi package must remain self-contained after installation.
+For source-tree, local-path, and git installs, the pi package should execute the canonical runtime directly from `hooks/bash-approve/` inside the installed repository checkout.
 
 ### Recommendation
 
-Bundle a staged runtime directory under the pi package and invoke it through a package-local shim.
-
-### Proposed runtime bundle contents
-
-The staged runtime should include the same inputs the current hook bundle needs:
-- Go source files
-- `go.mod`
-- `go.sum`
-- `categories.yaml`
-- a pi-specific run shim such as `run-pi-runtime.sh`
+Keep `hooks/bash-approve/` as the only source of truth in the source tree. Do not commit a duplicated Go runtime under `packages/pi-bash-approve/`.
 
 ### Shim behavior
 
-`run-pi-runtime.sh` should:
+`hooks/bash-approve/run-pi-runtime.sh` should:
 - rebuild the Go binary when sources/config change, mirroring the existing hook shim strategy
 - invoke the compiled binary with `--pi`
 - pass through `--config` when supplied by the TypeScript adapter
 
-### Why stage the runtime
+### Why this works for installed pi packages
 
-Installed pi packages cannot reliably reach back into this repository checkout. The runtime must therefore be available inside the installed package boundary.
+Git and local-path package installs keep the full repository checkout inside pi's managed package location, so the extension can resolve `hooks/bash-approve/run-pi-runtime.sh` relative to its own installed path without relying on the original development checkout.
 
-### How duplication stays acceptable
+### Future npm packaging
 
-The staged runtime is not a second source of truth. It should be treated as a generated/synced bundle derived from `hooks/bash-approve/`.
+If npm distribution is added later, any packaged runtime assets should be generated at packaging time rather than committed as a second authored runtime tree in the source repository.
 
 ## Packaging / Release Flow
 
-The repo should define an explicit sync step that stages the Go runtime into the pi package.
-
-### Recommended release/sync flow
+### Recommended release flow
 
 1. edit Go source of truth under `hooks/bash-approve/`
-2. run a sync script that stages runtime assets into `packages/pi-bash-approve/runtime/`
-3. run Go tests for runtime behavior
-4. run TypeScript/package tests for adapter behavior
-5. publish/install the pi package using the staged runtime bundle
-
-### Recommended helper script
-
-Introduce a script such as:
-
-```text
-scripts/sync-pi-runtime.sh
-```
-
-Responsibilities:
-- copy the required runtime files from `hooks/bash-approve/`
-- ensure pi-only shim/config files are present
-- optionally validate that the staged bundle is up to date in CI
-
-### CI edge case
-
-CI should detect drift between:
-- `hooks/bash-approve/`
-- `packages/pi-bash-approve/runtime/`
-
-Otherwise the package may ship stale policy code.
+2. run Go tests for runtime behavior
+3. run TypeScript/package tests for adapter behavior
+4. publish/install the pi package from a full repo checkout for git/local installs
+5. if npm support is added later, generate package-local runtime assets during packaging rather than maintaining committed duplicates
 
 ## Concrete Test Strategy
 
