@@ -5,9 +5,35 @@ import { chooseRuntimePath } from "./runtime-client";
 import type { ProtectedToolContext } from "./overrides/shared";
 
 export type ExecutionResolver = (ctx: ProtectedToolContext) => Promise<{
-  runtimePath: string;
+  runtimePath?: string;
   config: PiBashApproveConfig;
 }>;
+
+export function resolveExecutionForConfig(input: {
+  packageDir: string;
+  cwd: string;
+  config: PiBashApproveConfig;
+  chooseRuntimePathImpl?: typeof chooseRuntimePath;
+}): {
+  runtimePath?: string;
+  config: PiBashApproveConfig;
+} {
+  if (input.config.enabled === false) {
+    return { config: input.config, runtimePath: undefined };
+  }
+
+  const repoRoot = path.resolve(input.packageDir, "../..");
+  const bundledRuntimePath = path.join(input.packageDir, "runtime", "run-pi-runtime.sh");
+  const repoLocalRuntimePath = path.join(repoRoot, "hooks", "bash-approve", "run-pi-runtime.sh");
+  const runtimePath = (input.chooseRuntimePathImpl ?? chooseRuntimePath)({
+    packageDir: input.packageDir,
+    repoRoot,
+    explicitRuntimePath: input.config.runtimePath,
+    bundledRuntimePath,
+    repoLocalRuntimePath,
+  });
+  return { config: input.config, runtimePath };
+}
 
 /**
  * Build a per-execution resolver from the installed package location.
@@ -17,19 +43,12 @@ export type ExecutionResolver = (ctx: ProtectedToolContext) => Promise<{
  * that would otherwise drift independently.
  */
 export function createExecutionResolver(packageDir: string): ExecutionResolver {
-  const repoRoot = path.resolve(packageDir, "../..");
-  const bundledRuntimePath = path.join(packageDir, "runtime", "run-pi-runtime.sh");
-  const repoLocalRuntimePath = path.join(repoRoot, "hooks", "bash-approve", "run-pi-runtime.sh");
-
   return async (ctx: ProtectedToolContext) => {
     const config = await resolveConfig({ cwd: ctx.cwd });
-    const runtimePath = chooseRuntimePath({
+    return resolveExecutionForConfig({
       packageDir,
-      repoRoot,
-      explicitRuntimePath: config.runtimePath,
-      bundledRuntimePath,
-      repoLocalRuntimePath,
+      cwd: ctx.cwd,
+      config,
     });
-    return { runtimePath, config };
   };
 }

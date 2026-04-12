@@ -26,16 +26,20 @@ export async function adjudicateAndExecute<T>(input: {
   runtimeInput: PiRuntimeInput;
   ctx: ProtectedToolContext;
   config: PiBashApproveConfig;
-  runtimePath: string;
+  runtimePath?: string;
   runRuntime(runtimePath: string, input: PiRuntimeInput, configPath?: string): Promise<PiRuntimeOutput>;
   builtInExecute(): Promise<T>;
 }): Promise<T> {
   if (input.config.enabled === false) {
     return input.builtInExecute();
   }
+  if (!input.runtimePath) {
+    throw new PolicyBlockError("protected runtime is unavailable");
+  }
+  const runtimePath = input.runtimePath;
 
   return runProtectedTool(async () => {
-    const output = await input.runRuntime(input.runtimePath, input.runtimeInput, input.config.categoriesPath);
+    const output = await input.runRuntime(runtimePath, input.runtimeInput, input.config.categoriesPath);
     const action = normalizeDecision(output, { hasUI: input.ctx.hasUI });
     if (action.kind === "block") {
       throw new PolicyBlockError("blocked by policy");
