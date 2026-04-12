@@ -2,6 +2,8 @@
 
 A command approval runtime for Claude Code and OpenCode. It auto-approves safe Bash commands, repo-scoped `Read`/`Grep` calls for Claude Code, and blocks dangerous operations. Written in Go for fast startup.
 
+A reusable pi package is also included under `packages/pi-bash-approve/` for protecting pi `bash`, `read`, `grep`, `find`, and `ls` tool calls via the same Go runtime.
+
 ## Install
 
 ### OpenCode
