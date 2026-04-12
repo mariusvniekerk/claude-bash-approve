@@ -969,20 +969,13 @@ Add explicit regression coverage ensuring pi adapter behavior does not drift fro
 
 ### 4. Config-path tests
 
-If `--config` is added, test:
-- explicit config path is honored
+If `--config` is added, Go-side coverage should stay limited to runtime-facing behavior:
+- explicit `--config` path is honored by the runtime
 - missing config path returns structured config error
 - bundled/default config still works when no override is provided
+- runtime consumes the selected config file consistently once a concrete path is provided
 
-### 5. Config resolution / project-boundary tests
-
-Add explicit tests for the behavior introduced by this design:
-- pi started from a repo subdirectory still resolves the repo-root project config
-- two different repo/worktree roots do not share cached config
-- switching cwd/project boundary invalidates cached config and reloads the correct project config
-- non-repo upward-walk fallback finds a project-local `.pi/bash-approve.json` below `$HOME`
-- non-repo upward-walk fallback stops at `$HOME` and does not treat `~/.pi/bash-approve.json` as a valid project config
-- global config is used only after project-local resolution fails
+Project-config discovery, upward-walk resolution, and config-cache invalidation are adapter responsibilities and should be tested on the TypeScript side, not duplicated in Go contract tests.
 
 ## TypeScript-side tests
 
@@ -1020,6 +1013,9 @@ Verify:
 - defaults are applied when files are absent
 - malformed config is handled conservatively
 - repo/worktree root discovery drives project config lookup instead of raw cwd alone
+- pi started from a repo subdirectory still resolves the repo-root project config
+- switching between different repo/worktree roots invalidates cached config and loads the correct project config
+- non-repo upward-walk fallback finds a project-local `.pi/bash-approve.json` below `$HOME`
 - upward-walk fallback stops at the documented boundary and cannot create an undocumented pseudo-global config
 - cache keys prevent config bleed across project-boundary changes
 
@@ -1037,9 +1033,8 @@ At the package-helper level, test:
 Add at least a small number of end-to-end smoke tests around the staged runtime + adapter package boundary.
 
 Recommended smoke coverage:
-- package-local runtime invocation works from the pi package directory
 - repo-local development runtime invocation automatically prefers the source/runtime path when running from this repository checkout
-- bundled-runtime fallback works when no explicit override and no repo-local source checkout runtime is in effect
+- bundled-runtime fallback works from an installed/copied package location **outside this repository checkout**, or under an explicit test mode that disables repo-local preference while exercising staged package assets
 - prompt-producing path behaves correctly in an environment with mocked UI confirmation
 
 These tests do not need to exercise a real LLM. They only need to validate the protected-tool execution pipeline.
