@@ -14,6 +14,13 @@ export type ProtectedToolContext = {
   };
 };
 
+/**
+ * Centralize the policy handoff so every protected built-in tool shares the same fail-closed rules.
+ *
+ * This is where pi-specific behavior diverges from the underlying Go runtime contract: we bypass the
+ * adapter entirely when disabled, serialize active checks to keep approval UX sane, and convert
+ * denied/rejected approvals into tool errors instead of synthetic successful tool results.
+ */
 export async function adjudicateAndExecute<T>(input: {
   toolName: PiRuntimeInput["tool"];
   runtimeInput: PiRuntimeInput;
@@ -38,17 +45,31 @@ export async function adjudicateAndExecute<T>(input: {
         throw new PolicyBlockError("approval required but no UI is available");
       }
       const reason = output.kind === "decision" ? output.reason : output.error.message;
-      const message = input.toolName === "bash"
-        ? buildBashPrompt((input.runtimeInput as Extract<PiRuntimeInput, { tool: "bash" }>).command, input.ctx.cwd, reason)
-        : buildPathPrompt(input.toolName, pathLabel(input.runtimeInput), input.ctx.cwd, reason);
-      const title = input.toolName === "bash" ? "Allow bash command?" : "Allow out-of-bounds tool access?";
-      const confirmed = await input.ctx.ui.confirm(title, message);
+      const prompt = buildApprovalPrompt(input.runtimeInput, input.ctx.cwd, reason);
+      const confirmed = await input.ctx.ui.confirm(prompt.title, prompt.message);
       if (!confirmed) {
         throw new PolicyBlockError("blocked by user");
       }
     }
     return input.builtInExecute();
   });
+}
+
+/**
+ * Surface the most useful human-readable target in approval prompts rather than echoing raw JSON.
+ */
+function buildApprovalPrompt(input: PiRuntimeInput, cwd: string, reason?: string) {
+  if (input.tool === "bash") {
+    return {
+      title: "Allow bash command?",
+      message: buildBashPrompt(input.command, cwd, reason),
+    };
+  }
+
+  return {
+    title: "Allow out-of-bounds tool access?",
+    message: buildPathPrompt(input.tool, pathLabel(input), cwd, reason),
+  };
 }
 
 function pathLabel(input: PiRuntimeInput): string {

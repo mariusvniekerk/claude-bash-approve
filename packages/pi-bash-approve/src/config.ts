@@ -2,6 +2,12 @@ import { access, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+/**
+ * Configuration stays intentionally small because the Go runtime remains the policy authority.
+ *
+ * These values only control how the TypeScript adapter locates and invokes that runtime, plus
+ * whether the adapter is active at all.
+ */
 export type PiBashApproveConfig = {
   enabled?: boolean;
   runtimePath?: string;
@@ -22,6 +28,10 @@ async function readConfig(filePath: string): Promise<PiBashApproveConfig | undef
   return JSON.parse(await readFile(filePath, "utf8")) as PiBashApproveConfig;
 }
 
+/**
+ * Anchor config lookup to the repository root when one exists so all subdirectories in the same
+ * repo/worktree see the same policy configuration.
+ */
 async function findRepoRoot(start: string): Promise<string | undefined> {
   let current = path.resolve(start);
   while (true) {
@@ -32,6 +42,11 @@ async function findRepoRoot(start: string): Promise<string | undefined> {
   }
 }
 
+/**
+ * Non-repo directories still get project-local config, but the upward walk stops before `$HOME`
+ * so `~/.pi/...` remains the only supported global location and accidental pseudo-global configs do
+ * not shadow it.
+ */
 async function findProjectConfigOutsideRepo(start: string, homeDir?: string): Promise<string | undefined> {
   let current = path.resolve(start);
   const stopDir = homeDir ? path.resolve(homeDir) : undefined;
@@ -45,6 +60,12 @@ async function findProjectConfigOutsideRepo(start: string, homeDir?: string): Pr
   }
 }
 
+/**
+ * Resolve config against the effective project boundary for the current tool execution.
+ *
+ * Doing this per `ctx.cwd` prevents config bleed when a single pi session traverses multiple repos
+ * or worktrees.
+ */
 export async function resolveConfig(input: { cwd: string; homeDir?: string }): Promise<PiBashApproveConfig> {
   const homeDir = input.homeDir ?? os.homedir();
   const repoRoot = await findRepoRoot(input.cwd);

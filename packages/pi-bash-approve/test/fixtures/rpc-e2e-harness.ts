@@ -1,30 +1,14 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { resolveConfig } from "../../src/config";
-import { chooseRuntimePath } from "../../src/runtime-client";
-import { createProtectedBashTool } from "../../src/overrides/bash";
-import { createProtectedReadTool } from "../../src/overrides/read";
+import { createExecutionResolver } from "../../src/execution-resolver";
+import { createProtectedBashTool, createProtectedReadTool } from "../../src/overrides/tools";
 
 const fixtureDir = path.dirname(fileURLToPath(import.meta.url));
 
 export default function (pi: ExtensionAPI) {
   const packageDir = path.resolve(fixtureDir, "../..");
-  const repoRoot = path.resolve(packageDir, "../..");
-  const bundledRuntimePath = path.join(packageDir, "runtime", "run-pi-runtime.sh");
-  const repoLocalRuntimePath = path.join(repoRoot, "hooks", "bash-approve", "run-pi-runtime.sh");
-
-  const resolveExecution = async (ctx: { cwd: string }) => {
-    const config = await resolveConfig({ cwd: ctx.cwd });
-    const runtimePath = chooseRuntimePath({
-      packageDir,
-      repoRoot,
-      explicitRuntimePath: config.runtimePath,
-      bundledRuntimePath,
-      repoLocalRuntimePath,
-    });
-    return { runtimePath, config };
-  };
+  const resolveExecution = createExecutionResolver(packageDir);
 
   pi.registerCommand("pi-bash-approve-read-e2e", {
     description: "Exercise the protected read tool through pi RPC",

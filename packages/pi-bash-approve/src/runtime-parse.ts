@@ -5,6 +5,10 @@ const SUPPORTED_TOOLS = new Set<SupportedPiTool>(["bash", "read", "grep", "find"
 const DECISIONS = new Set<PiPolicyDecision>(["allow", "deny", "ask", "noop"]);
 const ERROR_CODES = new Set<PiRuntimeErrorCode>(["invalid-input", "unsupported-tool", "config-error", "internal-error"]);
 
+/**
+ * Reject contract drift aggressively so the TypeScript adapter never "best effort" interprets a
+ * runtime response it does not actually understand.
+ */
 export function parseRuntimeOutput(stdout: string): PiRuntimeOutput {
   let value: unknown;
   try {

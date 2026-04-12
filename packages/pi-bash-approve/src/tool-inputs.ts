@@ -1,5 +1,11 @@
 import type { PiRuntimeInput } from "./runtime-contract";
 
+/**
+ * Normalize pi tool arguments into the narrower JSON contract expected by the Go runtime.
+ *
+ * This adapter intentionally performs only shallow coercion; semantic validation still belongs to
+ * the runtime so policy decisions remain single-sourced in Go.
+ */
 export function toRuntimeInput(toolName: string, input: Record<string, unknown>, cwd: string): PiRuntimeInput {
   switch (toolName) {
     case "bash":
