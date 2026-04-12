@@ -813,10 +813,11 @@ For v1, the recommended behavior is:
 
 1. determine repo/worktree root for `ctx.cwd` when possible
 2. if found, use `<root>/.pi/bash-approve.json`
-3. if not found, walk upward from `ctx.cwd` to filesystem root looking for `.pi/bash-approve.json`
-4. if still not found, use global config
+3. if not found, walk upward from `ctx.cwd` looking for `.pi/bash-approve.json`, but stop before crossing into the user's home-directory pseudo-global space
+4. specifically, the upward walk must stop at `$HOME` (or filesystem root if no home directory can be determined) and must **not** treat `~/.pi/bash-approve.json` as a valid project config location
+5. if no project-local config is found by that point, use global config at `~/.pi/agent/bash-approve.json`
 
-This keeps repo-scoped policy stable when pi starts in a subdirectory and avoids missing a root-level config file.
+This keeps repo-scoped policy stable when pi starts in a subdirectory, avoids missing a root-level config file in non-repo projects, and prevents cwd-dependent accidental precedence from undocumented pseudo-global paths under `$HOME`.
 
 ### Proposed config shape
 
@@ -973,6 +974,16 @@ If `--config` is added, test:
 - missing config path returns structured config error
 - bundled/default config still works when no override is provided
 
+### 5. Config resolution / project-boundary tests
+
+Add explicit tests for the behavior introduced by this design:
+- pi started from a repo subdirectory still resolves the repo-root project config
+- two different repo/worktree roots do not share cached config
+- switching cwd/project boundary invalidates cached config and reloads the correct project config
+- non-repo upward-walk fallback finds a project-local `.pi/bash-approve.json` below `$HOME`
+- non-repo upward-walk fallback stops at `$HOME` and does not treat `~/.pi/bash-approve.json` as a valid project config
+- global config is used only after project-local resolution fails
+
 ## TypeScript-side tests
 
 ### 1. Runtime parsing tests
@@ -1008,6 +1019,9 @@ Verify:
 - project config overrides global config
 - defaults are applied when files are absent
 - malformed config is handled conservatively
+- repo/worktree root discovery drives project config lookup instead of raw cwd alone
+- upward-walk fallback stops at the documented boundary and cannot create an undocumented pseudo-global config
+- cache keys prevent config bleed across project-boundary changes
 
 ### 5. Override tests
 
@@ -1024,7 +1038,8 @@ Add at least a small number of end-to-end smoke tests around the staged runtime 
 
 Recommended smoke coverage:
 - package-local runtime invocation works from the pi package directory
-- repo-local development runtime invocation works when explicitly pointed at source/runtime path
+- repo-local development runtime invocation automatically prefers the source/runtime path when running from this repository checkout
+- bundled-runtime fallback works when no explicit override and no repo-local source checkout runtime is in effect
 - prompt-producing path behaves correctly in an environment with mocked UI confirmation
 
 These tests do not need to exercise a real LLM. They only need to validate the protected-tool execution pipeline.
