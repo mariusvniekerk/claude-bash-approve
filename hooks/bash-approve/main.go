@@ -15,6 +15,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -790,21 +791,45 @@ func grepCommandLabel(input GrepInput) string {
 	return input.Pattern
 }
 
-func isOpenCodeMode() bool {
-	return len(os.Args) > 1 && os.Args[1] == "--opencode"
+type cliMode string
+
+const (
+	modeHook     cliMode = "hook"
+	modeOpenCode cliMode = "opencode"
+	modePi       cliMode = "pi"
+)
+
+type cliOptions struct {
+	mode       cliMode
+	configPath string
 }
 
-func isPiMode() bool {
-	return len(os.Args) > 1 && os.Args[1] == "--pi"
-}
+func parseCLIOptions(args []string) (cliOptions, error) {
+	fs := flag.NewFlagSet("approve-bash", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
 
-func configPathArg() string {
-	for i := 1; i < len(os.Args); i++ {
-		if os.Args[i] == "--config" && i+1 < len(os.Args) {
-			return os.Args[i+1]
-		}
+	var piMode bool
+	var openCodeMode bool
+	var configPath string
+	fs.BoolVar(&piMode, "pi", false, "emit pi runtime JSON output")
+	fs.BoolVar(&openCodeMode, "opencode", false, "emit OpenCode JSON output")
+	fs.StringVar(&configPath, "config", "", "path to categories config")
+
+	if err := fs.Parse(args); err != nil {
+		return cliOptions{}, err
 	}
-	return ""
+
+	mode := modeHook
+	if piMode && openCodeMode {
+		return cliOptions{}, fmt.Errorf("cannot combine --pi and --opencode")
+	}
+	if piMode {
+		mode = modePi
+	}
+	if openCodeMode {
+		mode = modeOpenCode
+	}
+	return cliOptions{mode: mode, configPath: configPath}, nil
 }
 
 func main() {
@@ -813,8 +838,8 @@ func main() {
 		os.Exit(0)
 	}
 
-	var data HookInput
-	if err := json.Unmarshal(rawInput, &data); err != nil {
+	opts, err := parseCLIOptions(os.Args[1:])
+	if err != nil {
 		os.Exit(0)
 	}
 
@@ -826,24 +851,23 @@ func main() {
 	payload := string(rawInput)
 
 	var cfg Config
-	configPath := configPathArg()
-	if configPath != "" {
-		cfg, err = loadExplicitConfigFromPath(configPath)
+	if opts.configPath != "" {
+		cfg, err = loadExplicitConfigFromPath(opts.configPath)
 	} else {
 		cfg, err = loadConfig()
 	}
 	if err != nil {
 		logDecision(db, payload, "", decisionDeny, err.Error())
-		if isPiMode() {
+		if opts.mode == modePi {
 			emitPiOutput(buildPiErrorOutput("config-error", err.Error()))
 		}
-		if isOpenCodeMode() {
+		if opts.mode == modeOpenCode {
 			emitOpenCodeOutput(OpenCodeOutput{Decision: decisionDeny, Reason: err.Error()})
 		}
 		emitDecision(decisionDeny, err.Error())
 	}
 
-	if isPiMode() {
+	if opts.mode == modePi {
 		var data PiInput
 		if err := json.Unmarshal(rawInput, &data); err != nil {
 			logDecision(db, payload, "", "error", "invalid pi input")
@@ -864,7 +888,7 @@ func main() {
 		emitPiOutput(out)
 	}
 
-	if isOpenCodeMode() {
+	if opts.mode == modeOpenCode {
 		var data OpenCodeInput
 		if err := json.Unmarshal(rawInput, &data); err != nil {
 			logDecision(db, payload, "", "noop", "")
@@ -875,6 +899,11 @@ func main() {
 		out := buildOpenCodeOutput(r)
 		logDecision(db, payload, cmd, out.Decision, out.Reason)
 		emitOpenCodeOutput(out)
+	}
+
+	var data HookInput
+	if err := json.Unmarshal(rawInput, &data); err != nil {
+		os.Exit(0)
 	}
 
 	cmd, r := evaluateToolUse(data, cfg)

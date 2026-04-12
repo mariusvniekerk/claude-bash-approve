@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -56,9 +58,22 @@ func TestPiMode_InvalidInput(t *testing.T) {
 	assert.JSONEq(t, `{"version":1,"kind":"error","error":{"code":"invalid-input","message":"invalid pi input"}}`, out)
 }
 
+func TestPiMode_CLIInvalidInputReturnsPiError(t *testing.T) {
+	out := runApproveBashCLI(t, []string{"--pi"}, []byte(`{"tool":`))
+	assert.JSONEq(t, `{"version":1,"kind":"error","error":{"code":"invalid-input","message":"invalid pi input"}}`, out)
+}
+
 func TestPiMode_ConfigPathError(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing.yaml")
 	out := runPiModeWithConfigPathForTest(t, missing, PiInput{Tool: "bash", Command: "git status", Cwd: t.TempDir()})
+	assert.JSONEq(t, `{"version":1,"kind":"error","error":{"code":"config-error","message":"cannot read config `+missing+`"}}`, out)
+}
+
+func TestPiMode_CLIParsesConfigFlagBeforeMode(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.yaml")
+	payload, err := json.Marshal(PiInput{Tool: "bash", Command: "git status", Cwd: t.TempDir()})
+	require.NoError(t, err)
+	out := runApproveBashCLI(t, []string{"--config", missing, "--pi"}, payload)
 	assert.JSONEq(t, `{"version":1,"kind":"error","error":{"code":"config-error","message":"cannot read config `+missing+`"}}`, out)
 }
 
@@ -167,4 +182,17 @@ func runPiModeWithConfigPathForTest(t *testing.T, configPath string, input PiInp
 		return string(out)
 	}
 	return runPiModeForTest(t, Config{Enabled: []string{"all"}}, input)
+}
+
+func runApproveBashCLI(t *testing.T, args []string, stdin []byte) string {
+	t.Helper()
+	cmd := exec.Command("go", append([]string{"run", "."}, args...)...)
+	cmd.Dir = "."
+	cmd.Stdin = bytes.NewReader(stdin)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	require.NoError(t, cmd.Run(), "stderr: %s", stderr.String())
+	return stdout.String()
 }

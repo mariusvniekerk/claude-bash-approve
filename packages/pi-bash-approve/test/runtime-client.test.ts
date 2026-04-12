@@ -33,18 +33,15 @@ test("falls back to bundled runtime when repo-local runtime is absent", async ()
   const packageDir = path.join(tempRoot, "packages", "pi-bash-approve");
   const repoLocalRuntimePath = path.join(tempRoot, "hooks", "bash-approve", "run-pi-runtime.sh");
   const bundledRuntimePath = path.join(packageDir, "runtime", "run-pi-runtime.sh");
-  await mkdir(path.dirname(bundledRuntimePath), { recursive: true });
-  await writeFile(bundledRuntimePath, "", "utf8");
 
   try {
-    const chosen = chooseRuntimePath({
+    expect(() => chooseRuntimePath({
       packageDir,
       repoRoot: tempRoot,
       explicitRuntimePath: undefined,
       bundledRuntimePath,
       repoLocalRuntimePath,
-    });
-    expect(chosen).toBe(bundledRuntimePath);
+    })).toThrow(/runtime/i);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }

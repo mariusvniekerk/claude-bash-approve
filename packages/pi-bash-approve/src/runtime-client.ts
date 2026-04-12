@@ -23,12 +23,15 @@ export function chooseRuntimePath(input: {
   if (input.explicitRuntimePath) return input.explicitRuntimePath;
   if (
     input.repoRoot &&
-    path.resolve(input.packageDir).startsWith(path.resolve(input.repoRoot)) &&
+    path.resolve(input.packageDir) === path.join(path.resolve(input.repoRoot), "packages", "pi-bash-approve") &&
     existsSync(input.repoLocalRuntimePath)
   ) {
     return input.repoLocalRuntimePath;
   }
-  return input.bundledRuntimePath;
+  if (existsSync(input.bundledRuntimePath)) {
+    return input.bundledRuntimePath;
+  }
+  throw new RuntimeInvocationError("no pi runtime found for this package installation");
 }
 
 /**

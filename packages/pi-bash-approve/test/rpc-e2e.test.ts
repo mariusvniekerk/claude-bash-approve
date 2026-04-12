@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, mkdir, realpath, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
@@ -8,6 +8,11 @@ import { test, expect } from "bun:test";
 type RpcMessage = Record<string, unknown>;
 
 test("real pi rpc emits approval confirm for protected out-of-bounds read", async () => {
+  const piCommand = findPiCommand();
+  if (!piCommand) {
+    console.warn("Skipping rpc e2e test: pi binary is not available");
+    return;
+  }
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "pi-bash-approve-rpc-e2e-"));
   const repoDir = path.join(tempRoot, "repo");
   const outsideFile = path.join(tempRoot, "outside.txt");
@@ -22,6 +27,7 @@ test("real pi rpc emits approval confirm for protected out-of-bounds read", asyn
   const effectiveRepoDir = await realpath(repoDir);
 
   const client = startRpcPi({
+    piCommand,
     cwd: repoDir,
     agentDir,
     extensions: [
@@ -69,6 +75,11 @@ test("real pi rpc emits approval confirm for protected out-of-bounds read", asyn
 });
 
 test("real pi rpc emits approval confirm for protected bash ask command", async () => {
+  const piCommand = findPiCommand();
+  if (!piCommand) {
+    console.warn("Skipping rpc e2e test: pi binary is not available");
+    return;
+  }
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "pi-bash-approve-rpc-e2e-bash-"));
   const repoDir = path.join(tempRoot, "repo");
   const agentDir = path.join(tempRoot, "agent-home");
@@ -81,6 +92,7 @@ test("real pi rpc emits approval confirm for protected bash ask command", async 
   const effectiveRepoDir = await realpath(repoDir);
 
   const client = startRpcPi({
+    piCommand,
     cwd: repoDir,
     agentDir,
     extensions: [
@@ -128,9 +140,9 @@ test("real pi rpc emits approval confirm for protected bash ask command", async 
   }
 });
 
-function startRpcPi(input: { cwd: string; agentDir: string; extensions: string[] }) {
+function startRpcPi(input: { piCommand: string; cwd: string; agentDir: string; extensions: string[] }) {
   const child = spawn(
-    process.env.PI_BIN ?? "pi",
+    input.piCommand,
     [
       "--mode",
       "rpc",
@@ -149,6 +161,7 @@ function startRpcPi(input: { cwd: string; agentDir: string; extensions: string[]
 
   let stdoutBuffer = "";
   let stderrBuffer = "";
+  const closePromise = once(child, "close");
   const seen: RpcMessage[] = [];
   const waiters: Array<{
     predicate: (message: RpcMessage) => boolean;
@@ -218,11 +231,24 @@ function startRpcPi(input: { cwd: string; agentDir: string; extensions: string[]
       });
     },
     async close() {
-      child.stdin.end();
-      child.kill("SIGTERM");
-      await once(child, "close");
+      if (child.exitCode === null && child.signalCode === null) {
+        child.stdin.end();
+        child.kill("SIGTERM");
+      }
+      await closePromise;
     },
   };
+}
+
+function findPiCommand(): string | undefined {
+  if (process.env.PI_BIN) {
+    return process.env.PI_BIN;
+  }
+  const probe = spawnSync("pi", ["--help"], { stdio: "ignore" });
+  if (probe.error) {
+    return undefined;
+  }
+  return "pi";
 }
 
 async function run(command: string, args: string[], cwd: string) {
