@@ -52,7 +52,7 @@ test("bypasses runtime and prompting when config is disabled", async () => {
     runtimeInput: { tool: "bash", command: "git tag v1.0.0", cwd: "/repo" },
     ctx: { cwd: "/repo", hasUI: true, ui: { confirm: async () => { calls.push("confirm"); return false; } } },
     config: { enabled: false },
-    runtimePath: "/runtime",
+    runtimePath: undefined,
     runRuntime: async () => {
       calls.push("runtime");
       return { version: 1, kind: "decision", tool: "bash", decision: "ask" };
