@@ -1,7 +1,8 @@
 {
   "private": true,
   "workspaces": [
-    "opencode-tester"
+    "opencode-tester",
+    "packages/pi-bash-approve"
   ],
   "devDependencies": {
     "@opencode-ai/plugin": "^1.4.1"

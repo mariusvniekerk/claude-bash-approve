@@ -1,0 +1,17 @@
+{
+  "name": "pi-bash-approve",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test ./test/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": ["./extensions"]
+  }
+}
