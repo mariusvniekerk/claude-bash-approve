@@ -33,10 +33,11 @@ Current fields:
 {
   "enabled": true,
   "runtimePath": "/optional/runtime/path",
-  "categoriesPath": "/optional/categories/path",
-  "serializeProtectedToolExecutions": true
+  "categoriesPath": "/optional/categories/path"
 }
 ```
+
+Protected executions are serialized internally by default; that is not currently configurable.
 
 ## Runtime
 

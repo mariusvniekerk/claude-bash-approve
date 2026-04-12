@@ -6,7 +6,6 @@ export type PiBashApproveConfig = {
   enabled?: boolean;
   runtimePath?: string;
   categoriesPath?: string;
-  serializeProtectedToolExecutions?: boolean;
 };
 
 async function exists(filePath: string) {
@@ -57,7 +56,6 @@ export async function resolveConfig(input: { cwd: string; homeDir?: string }): P
   if (projectConfig) {
     return {
       enabled: true,
-      serializeProtectedToolExecutions: true,
       ...projectConfig,
     };
   }
@@ -65,7 +63,6 @@ export async function resolveConfig(input: { cwd: string; homeDir?: string }): P
   const globalConfig = await readConfig(path.join(homeDir, ".pi", "agent", "bash-approve.json"));
   return {
     enabled: true,
-    serializeProtectedToolExecutions: true,
     ...globalConfig,
   };
 }

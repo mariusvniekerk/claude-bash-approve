@@ -826,16 +826,15 @@ export type PiBashApproveConfig = {
   enabled?: boolean;
   runtimePath?: string;
   categoriesPath?: string;
-  serializeProtectedToolExecutions?: boolean;
 };
 ```
 
 ### Default behavior
 
 - `enabled`: `true`
-- `serializeProtectedToolExecutions`: `true`
 - `runtimePath`: use explicit override if present; otherwise prefer repo-local runtime in this source checkout, else use the bundled package runtime
 - `categoriesPath`: use explicit override if present, else runtime-local `categories.yaml`
+- protected executions are serialized internally
 
 ### Config precedence
 

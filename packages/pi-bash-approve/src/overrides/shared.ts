@@ -23,6 +23,10 @@ export async function adjudicateAndExecute<T>(input: {
   runRuntime(runtimePath: string, input: PiRuntimeInput, configPath?: string): Promise<PiRuntimeOutput>;
   builtInExecute(): Promise<T>;
 }): Promise<T> {
+  if (input.config.enabled === false) {
+    return input.builtInExecute();
+  }
+
   return runProtectedTool(async () => {
     const output = await input.runRuntime(input.runtimePath, input.runtimeInput, input.config.categoriesPath);
     const action = normalizeDecision(output, { hasUI: input.ctx.hasUI });

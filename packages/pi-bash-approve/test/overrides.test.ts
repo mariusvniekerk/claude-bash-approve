@@ -44,3 +44,24 @@ test("throws when prompt is rejected", async () => {
     builtInExecute: async () => ({ ok: true }),
   })).rejects.toThrow(/blocked by user/i);
 });
+
+test("bypasses runtime and prompting when config is disabled", async () => {
+  const calls: string[] = [];
+  const result = await adjudicateAndExecute({
+    toolName: "bash",
+    runtimeInput: { tool: "bash", command: "git tag v1.0.0", cwd: "/repo" },
+    ctx: { cwd: "/repo", hasUI: true, ui: { confirm: async () => { calls.push("confirm"); return false; } } },
+    config: { enabled: false },
+    runtimePath: "/runtime",
+    runRuntime: async () => {
+      calls.push("runtime");
+      return { version: 1, kind: "decision", tool: "bash", decision: "ask" };
+    },
+    builtInExecute: async () => {
+      calls.push("execute");
+      return { ok: true };
+    },
+  });
+  expect(calls).toEqual(["execute"]);
+  expect(result).toEqual({ ok: true });
+});
