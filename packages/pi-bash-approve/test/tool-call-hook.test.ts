@@ -31,6 +31,31 @@ test("ignores unprotected tools", async () => {
   expect(calls).toEqual([]);
 });
 
+test("bypasses protection when the no-bash-approve flag is active", async () => {
+  const calls: string[] = [];
+  const handler = createProtectedToolCallHandler(
+    async () => {
+      calls.push("resolve");
+      return { config: {}, runtimePath: "/runtime" };
+    },
+    async () => {
+      calls.push("runtime");
+      return { version: 1, kind: "decision", tool: "bash", decision: "deny" };
+    },
+    {
+      shouldBypass: () => true,
+    },
+  );
+
+  const result = await handler(
+    { type: "tool_call", toolCallId: "1", toolName: "bash", input: { command: "rm -rf ." } },
+    baseCtx,
+  );
+
+  expect(result).toBeUndefined();
+  expect(calls).toEqual([]);
+});
+
 test("bypasses runtime when config is disabled", async () => {
   const calls: string[] = [];
   const handler = createProtectedToolCallHandler(

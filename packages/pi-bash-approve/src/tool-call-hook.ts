@@ -18,11 +18,17 @@ function isProtectedToolName(toolName: string): toolName is SupportedPiTool {
 export function createProtectedToolCallHandler(
   resolveExecution: ExecutionResolver,
   runRuntimeImpl: typeof runRuntime = runRuntime,
+  options?: {
+    shouldBypass?: () => boolean;
+  },
 ) {
   return async (
     event: ToolCallEvent,
     ctx: ProtectedToolContext,
   ): Promise<ToolCallEventResult | undefined> => {
+    if (options?.shouldBypass?.()) {
+      return undefined;
+    }
     if (!isProtectedToolName(event.toolName)) {
       return undefined;
     }

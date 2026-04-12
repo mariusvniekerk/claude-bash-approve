@@ -16,5 +16,19 @@ const extensionDir = path.dirname(fileURLToPath(import.meta.url));
 export default function (pi: ExtensionAPI) {
   const packageDir = path.resolve(extensionDir, "..");
   const resolveExecution = createExecutionResolver(packageDir);
-  pi.on("tool_call", createProtectedToolCallHandler(resolveExecution));
+  let bypassProtection = false;
+
+  pi.registerFlag("no-bash-approve", {
+    description: "Disable pi-bash-approve protection for this session",
+    type: "boolean",
+    default: false,
+  });
+
+  pi.on("session_start", () => {
+    bypassProtection = pi.getFlag("no-bash-approve") === true;
+  });
+
+  pi.on("tool_call", createProtectedToolCallHandler(resolveExecution, undefined, {
+    shouldBypass: () => bypassProtection,
+  }));
 }
