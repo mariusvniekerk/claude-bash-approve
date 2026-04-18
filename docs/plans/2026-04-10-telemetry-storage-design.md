@@ -1,6 +1,6 @@
 # Telemetry Storage Migration Design
 
-**Date:** 2026-04-10  
+**Date:** 2026-04-10
 **Status:** Proposed
 
 ## Goal

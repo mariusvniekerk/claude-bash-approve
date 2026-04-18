@@ -1,6 +1,6 @@
 # Pi Bash-Approve Integration Design
 
-**Date:** 2026-04-12  
+**Date:** 2026-04-12
 **Status:** Working Draft
 
 ## Goal

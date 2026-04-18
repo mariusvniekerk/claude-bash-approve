@@ -27,19 +27,6 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
-type HookInput struct {
-	ToolName  string          `json:"tool_name"`
-	ToolInput json.RawMessage `json:"tool_input"`
-	Cwd       string          `json:"cwd"`
-}
-
-type BashInput struct {
-	Command         string `json:"command"`
-	Description     string `json:"description"`
-	Timeout         int    `json:"timeout"`
-	RunInBackground bool   `json:"run_in_background"`
-}
-
 type ReadInput struct {
 	FilePath string `json:"file_path"`
 }
@@ -48,17 +35,6 @@ type GrepInput struct {
 	Pattern string   `json:"pattern"`
 	Path    string   `json:"path"`
 	Paths   []string `json:"paths"`
-}
-
-type OpenCodeInput struct {
-	Tool    string `json:"tool"`
-	Command string `json:"command"`
-	Cwd     string `json:"cwd"`
-}
-
-type OpenCodeOutput struct {
-	Decision string `json:"decision"`
-	Reason   string `json:"reason,omitempty"`
 }
 
 type PiInput struct {
@@ -82,16 +58,6 @@ type PiOutput struct {
 	Decision string   `json:"decision,omitempty"`
 	Reason   string   `json:"reason,omitempty"`
 	Error    *PiError `json:"error,omitempty"`
-}
-
-type HookOutput struct {
-	HookSpecificOutput HookDecision `json:"hookSpecificOutput"`
-}
-
-type HookDecision struct {
-	HookEventName            string `json:"hookEventName"`
-	PermissionDecision       string `json:"permissionDecision"`
-	PermissionDecisionReason string `json:"permissionDecisionReason"`
 }
 
 // Decision constants for hook permission decisions.
@@ -221,25 +187,6 @@ func buildActivePatterns(cfg Config) (wrappers []pattern, commands []pattern) {
 		}
 	}
 	return
-}
-
-func emitDecision(decision, reason string) {
-	out := HookOutput{
-		HookSpecificOutput: HookDecision{
-			HookEventName:            "PreToolUse",
-			PermissionDecision:       decision,
-			PermissionDecisionReason: reason,
-		},
-	}
-	b, _ := json.Marshal(out)
-	fmt.Println(string(b))
-	os.Exit(0)
-}
-
-func emitOpenCodeOutput(out OpenCodeOutput) {
-	b, _ := json.Marshal(out)
-	fmt.Println(string(b))
-	os.Exit(0)
 }
 
 func emitPiOutput(out PiOutput) {
@@ -689,40 +636,6 @@ func evaluate(cmd string, ctx evalContext, wrapperPats []pattern, commandPats []
 	return mergeStmtResults(file.Stmts, ctx, wrapperPats, commandPats)
 }
 
-func evaluateToolUse(input HookInput, cfg Config) (string, *result) {
-	ctx := evalContext{cwd: input.Cwd}
-
-	switch input.ToolName {
-	case "Bash":
-		var bashInput BashInput
-		if err := json.Unmarshal(input.ToolInput, &bashInput); err != nil {
-			return "", nil
-		}
-		return bashInput.Command, Evaluate(bashInput.Command, cfg, ctx)
-	case "Read":
-		var readInput ReadInput
-		if err := json.Unmarshal(input.ToolInput, &readInput); err != nil {
-			return "", nil
-		}
-		return readInput.FilePath, evaluateReadTool(readInput, ctx)
-	case "Grep":
-		var grepInput GrepInput
-		if err := json.Unmarshal(input.ToolInput, &grepInput); err != nil {
-			return "", nil
-		}
-		return grepCommandLabel(grepInput), evaluateGrepTool(grepInput, ctx)
-	default:
-		return "", nil
-	}
-}
-
-func evaluateOpenCodeToolUse(input OpenCodeInput, cfg Config) (string, *result) {
-	if input.Tool != "bash" {
-		return "", nil
-	}
-	return input.Command, Evaluate(input.Command, cfg, evalContext{cwd: input.Cwd})
-}
-
 func evaluatePiToolUse(input PiInput, cfg Config) (string, *result, error) {
 	ctx := evalContext{cwd: input.Cwd}
 	if input.Cwd == "" {
@@ -767,20 +680,6 @@ func buildPiOutput(tool string, r *result) PiOutput {
 	return PiOutput{Version: 1, Kind: "decision", Tool: tool, Decision: decision, Reason: reason}
 }
 
-func buildOpenCodeOutput(r *result) OpenCodeOutput {
-	if r == nil {
-		return OpenCodeOutput{Decision: "noop"}
-	}
-	if r.decision == "" {
-		return OpenCodeOutput{Decision: "noop", Reason: r.reason}
-	}
-	reason := r.reason
-	if r.decision == decisionDeny && r.denyReason != "" {
-		reason = r.denyReason
-	}
-	return OpenCodeOutput{Decision: r.decision, Reason: reason}
-}
-
 func grepCommandLabel(input GrepInput) string {
 	if input.Path != "" {
 		return input.Path
@@ -797,6 +696,7 @@ const (
 	modeHook     cliMode = "hook"
 	modeOpenCode cliMode = "opencode"
 	modePi       cliMode = "pi"
+	modeCodex    cliMode = "codex"
 )
 
 type cliOptions struct {
@@ -810,9 +710,11 @@ func parseCLIOptions(args []string) (cliOptions, error) {
 
 	var piMode bool
 	var openCodeMode bool
+	var codexMode bool
 	var configPath string
 	fs.BoolVar(&piMode, "pi", false, "emit pi runtime JSON output")
 	fs.BoolVar(&openCodeMode, "opencode", false, "emit OpenCode JSON output")
+	fs.BoolVar(&codexMode, "codex", false, "emit Codex JSON output")
 	fs.StringVar(&configPath, "config", "", "path to categories config")
 
 	if err := fs.Parse(args); err != nil {
@@ -820,14 +722,21 @@ func parseCLIOptions(args []string) (cliOptions, error) {
 	}
 
 	mode := modeHook
-	if piMode && openCodeMode {
-		return cliOptions{}, fmt.Errorf("cannot combine --pi and --opencode")
-	}
+	selectedModes := 0
 	if piMode {
+		selectedModes++
 		mode = modePi
 	}
 	if openCodeMode {
+		selectedModes++
 		mode = modeOpenCode
+	}
+	if codexMode {
+		selectedModes++
+		mode = modeCodex
+	}
+	if selectedModes > 1 {
+		return cliOptions{}, fmt.Errorf("cannot combine multiple output modes")
 	}
 	return cliOptions{mode: mode, configPath: configPath}, nil
 }
@@ -864,6 +773,9 @@ func main() {
 		if opts.mode == modeOpenCode {
 			emitOpenCodeOutput(OpenCodeOutput{Decision: decisionDeny, Reason: err.Error()})
 		}
+		if opts.mode == modeCodex {
+			emitCodexOutput(buildCodexOutput(&result{decision: decisionDeny, denyReason: err.Error()}))
+		}
 		emitDecision(decisionDeny, err.Error())
 	}
 
@@ -899,6 +811,25 @@ func main() {
 		out := buildOpenCodeOutput(r)
 		logDecision(db, payload, cmd, out.Decision, out.Reason)
 		emitOpenCodeOutput(out)
+	}
+
+	if opts.mode == modeCodex {
+		var data CodexInput
+		if err := json.Unmarshal(rawInput, &data); err != nil {
+			logDecision(db, payload, "", "noop", "")
+			emitCodexOutput(CodexOutput{Continue: true})
+		}
+
+		cmd, r := evaluateCodexToolUse(data, cfg)
+		out := buildCodexOutput(r)
+		decision := "noop"
+		reason := ""
+		if out.HookSpecificOutput != nil && out.HookSpecificOutput.Decision != nil {
+			decision = out.HookSpecificOutput.Decision.Behavior
+			reason = out.HookSpecificOutput.Decision.Reason
+		}
+		logDecision(db, payload, cmd, decision, reason)
+		emitCodexOutput(out)
 	}
 
 	var data HookInput

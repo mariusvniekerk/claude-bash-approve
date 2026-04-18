@@ -6,29 +6,36 @@ A reusable pi package is also included under `packages/pi-bash-approve/` for pro
 
 ## Install
 
-### OpenCode
-
-The first OpenCode integration targets `bash` approvals.
-
-Project-local install:
+Use unified installer:
 
 ```bash
-./install-opencode.sh --project
+python3 install.py install --target claude
+python3 install.py install --target opencode
+python3 install.py install --target opencode --scope project
+python3 install.py install --target opencode --scope both
+python3 install.py install --target codex
+python3 install.py install --target codex --scope project
+python3 install.py install --target codex --scope both
+python3 install.py install --target all
 ```
 
-Global install:
+For `opencode` and `codex`, default `--scope` is `global`.
+
+Uninstall uses same entrypoint:
 
 ```bash
-./install-opencode.sh --global
+python3 install.py uninstall --target claude
+python3 install.py uninstall --target opencode --scope both
+python3 install.py uninstall --target codex --scope both
+python3 install.py uninstall --target all
 ```
 
-Install both:
+Installer requirements:
 
-```bash
-./install-opencode.sh --both
-```
+- Python 3.11+
+- Go 1.25+
 
-The installer writes the OpenCode plugin, installs the runtime for global mode, and ensures OpenCode is configured to route `bash` permissions through `ask`. If `opencode.json` already exists, pass `--force` to merge the permission setting automatically with `jq`.
+Shared runtime installs to `$XDG_DATA_HOME/claude-bash-approve` when `XDG_DATA_HOME` is an absolute path, else `~/.local/share/claude-bash-approve`.
 
 ### Claude Code
 
@@ -38,7 +45,7 @@ In Claude Code:
 /plugin install github:mariusvniekerk/claude-bash-approve
 ```
 
-That's it. The hook registers automatically and the Go binary compiles on first use. Requires Go 1.25+.
+For local/manual install, run `python3 install.py install --target claude`.
 
 ## How it works
 
@@ -74,29 +81,30 @@ The hook uses a compositional model: a command is split into **wrappers** (prefi
 
 ## Alternative installation
 
-### install.sh
-
 ```bash
 git clone https://github.com/mariusvniekerk/claude-bash-approve.git
 cd claude-bash-approve
-./install.sh
+python3 install.py install --target claude
 ```
 
-Copies the hook source bundle into `~/.claude/hooks/bash-approve/`, builds the binary there, creates `~/.claude/settings.json` if needed, and adds the hook. Pass `--force` to merge into an existing settings file (requires `jq`).
-
-### OpenCode installer
-
-`install-opencode.sh` supports both OpenCode layouts:
-
-- `--project`: installs `.opencode/plugins/bash-approve.ts` in this repo and configures `./opencode.json`
-- `--global`: installs `~/.config/opencode/plugins/bash-approve.ts`, copies the Go runtime into `~/.config/opencode/bash-approve/`, and configures `~/.config/opencode/opencode.json`
+OpenCode installs write plugin files under project/global OpenCode config and point them at shared runtime hook. Codex installs enable `codex_hooks` and write `PermissionRequest` hook config pointing at shared runtime hook.
 
 TypeScript support for the OpenCode plugin is enforced via `bun --cwd opencode-tester run typecheck`.
 
-For this local checkout, a `pre-commit` hook is installed that runs `scripts/typecheck-opencode.sh`.
-- `--both`: installs both layouts
+This repo also includes `prek.toml` for pre-commit checks:
 
-OpenCode needs `permission.bash` set to `ask` so the plugin can turn safe commands into `allow`, dangerous commands into `deny`, and everything else back into the normal OpenCode approval prompt.
+```bash
+prek install --prepare-hooks
+```
+
+Configured hooks run:
+
+- builtin whitespace / EOF / large-file checks
+- `uv run python -m unittest -v install_test.py`
+- `cd hooks/bash-approve && go test ./...`
+- `cd hooks/bash-approve && golangci-lint run ./...`
+- `bun run typecheck` for OpenCode tester
+- `bun run --cwd packages/pi-bash-approve typecheck` for pi package
 
 ### Manual setup
 
@@ -106,7 +114,7 @@ OpenCode needs `permission.bash` set to `ask` so the plugin can turn safe comman
 git clone https://github.com/mariusvniekerk/claude-bash-approve.git
 ```
 
-2. Add the hook to your Claude Code settings (`~/.claude/settings.json`):
+2. Add hook to Claude Code settings (`~/.claude/settings.json`):
 
 ```json
 {
@@ -117,7 +125,7 @@ git clone https://github.com/mariusvniekerk/claude-bash-approve.git
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/bash-approve/run-hook.sh"
+            "command": "~/.local/share/claude-bash-approve/run-hook.sh"
           }
         ]
       },
@@ -126,7 +134,7 @@ git clone https://github.com/mariusvniekerk/claude-bash-approve.git
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/bash-approve/run-hook.sh"
+            "command": "~/.local/share/claude-bash-approve/run-hook.sh"
           }
         ]
       }
@@ -135,17 +143,18 @@ git clone https://github.com/mariusvniekerk/claude-bash-approve.git
 }
 ```
 
-3. Copy the runtime hook bundle into `~/.claude/hooks/bash-approve/`:
+3. Copy runtime hook bundle into shared data dir:
 
 ```bash
-mkdir -p ~/.claude/hooks/bash-approve
-cp hooks/bash-approve/*.go ~/.claude/hooks/bash-approve/
-cp hooks/bash-approve/go.mod hooks/bash-approve/go.sum ~/.claude/hooks/bash-approve/
-cp hooks/bash-approve/categories.yaml hooks/bash-approve/run-hook.sh ~/.claude/hooks/bash-approve/
-chmod +x ~/.claude/hooks/bash-approve/run-hook.sh
+runtime_root="${XDG_DATA_HOME:-$HOME/.local/share}/claude-bash-approve"
+mkdir -p "$runtime_root"
+cp hooks/bash-approve/*.go "$runtime_root"/
+cp hooks/bash-approve/go.mod hooks/bash-approve/go.sum "$runtime_root"/
+cp hooks/bash-approve/categories.yaml hooks/bash-approve/run-hook.sh "$runtime_root"/
+chmod +x "$runtime_root/run-hook.sh"
 ```
 
-4. The hook auto-compiles on first run. The `run-hook.sh` shim rebuilds the Go binary whenever source files change, so there's no manual build step.
+4. Hook auto-compiles on first run. `run-hook.sh` rebuilds Go binary whenever source files change, so no manual build step.
 
 ## Configuration
 

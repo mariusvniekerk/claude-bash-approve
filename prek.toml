@@ -1,0 +1,56 @@
+# Configuration file for `prek`, a git hook framework written in Rust.
+# See https://prek.j178.dev for more information.
+#:schema https://www.schemastore.org/prek.json
+
+[[repos]]
+repo = "builtin"
+hooks = [
+    { id = "trailing-whitespace" },
+    { id = "end-of-file-fixer" },
+    { id = "check-added-large-files" },
+]
+
+[[repos]]
+repo = "local"
+hooks = [
+    {
+        id = "python-installer-tests",
+        name = "python installer tests",
+        entry = "uv run python -m unittest -v install_test.py",
+        language = "system",
+        pass_filenames = false,
+        always_run = true,
+    },
+    {
+        id = "go-tests",
+        name = "go tests",
+        entry = "bash -lc 'cd hooks/bash-approve && go test ./...'",
+        language = "system",
+        pass_filenames = false,
+        always_run = true,
+    },
+    {
+        id = "golangci-lint",
+        name = "golangci-lint",
+        entry = "bash -lc 'cd hooks/bash-approve && golangci-lint run ./...'",
+        language = "system",
+        pass_filenames = false,
+        always_run = true,
+    },
+    {
+        id = "opencode-typecheck",
+        name = "opencode typecheck",
+        entry = "bun run typecheck",
+        language = "system",
+        pass_filenames = false,
+        always_run = true,
+    },
+    {
+        id = "pi-typecheck",
+        name = "pi typecheck",
+        entry = "bun run --cwd packages/pi-bash-approve typecheck",
+        language = "system",
+        pass_filenames = false,
+        always_run = true,
+    },
+]
