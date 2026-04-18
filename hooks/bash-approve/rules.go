@@ -108,7 +108,7 @@ func commandPatterns() []pattern {
 		NewPattern(`^git\s+(-C\s+\S+\s+)?push\b`, tags("git push", "git"), WithDecision("")),
 
 		// jj (Jujutsu)
-		NewPattern(`^jj\s+(log|diff|show|status|file\s+(list|show)|op\s+log|config\s+(list|get)|bookmark\s+list|branch\s+list)\b`, tags("jj read op", "jj")),
+		NewPattern(`^jj\s+(log|diff|show|status|st|file\s+(list|show)|op\s+log|config\s+(list|get)|bookmark\s+list|branch\s+list)\b`, tags("jj read op", "jj")),
 		NewPattern(`^jj\s+(new|commit|describe|squash|edit|abandon|restore|rebase|split|bookmark\s+(create|delete|forget|move|rename|set|track|untrack)|branch\s+(create|delete|forget|move|rename|set|track|untrack)|git\s+fetch)\b`, tags("jj write op", "jj")),
 		NewPattern(`^jj\s+git\s+push\b`, tags("jj git push", "jj"), WithDecision("")),
 
@@ -150,6 +150,7 @@ func commandPatterns() []pattern {
 		NewPattern(`^mkdir\b`, tags("mkdir", "shell")),
 		NewPattern(`^cp\s+-[a-zA-Z]*n`, tags("cp -n", "shell")),
 		NewPattern(`^ln\s+-[a-eg-zA-Z]*s[a-eg-zA-Z]*\s`, tags("ln -s", "shell")),
+		NewPattern(`^(open|xdg-open)\b`, tags("open media", "shell"), WithValidator(isMediaOpenTarget), WithValidatorFallback("")),
 		NewPattern(`^(true|false|exit(\s+\d+)?|wait)$`, tags("shell builtin", "shell")),
 		NewPattern(`^unset\b`, tags("shell vars", "shell")),
 		NewPattern(`^(pkill|kill)\b`, tags("process mgmt", "shell")),
@@ -175,6 +176,7 @@ func commandPatterns() []pattern {
 
 		// gh (GitHub CLI)
 		NewPattern(`^gh\s+(pr|issue|run|release|repo)\s+(view|list|diff|checks|status|comment)\b`, tags("gh read op", "gh")),
+		NewPattern(`^gh\s+image\b`, tags("gh image", "gh")),
 		NewPattern(`^gh\s+search\s+(code|repos|issues|prs|commits)\b`, tags("gh search", "gh")),
 		NewPattern(`^gh\s+repo\s+clone\b`, tags("gh repo clone", "gh")),
 		NewPattern(`^gh\s+pr\s+create\b`, tags("gh pr create", "gh"), WithDecision("")),
@@ -186,6 +188,7 @@ func commandPatterns() []pattern {
 			WithDenyReason("BLOCKED: go mod vendor is banned. It copies all dependencies into the repo.")),
 		NewPattern(`^go\s+mod\s+init\b`, tags("go mod init", "go"), WithDecision("")),
 		NewPattern(`^go\s+(build|test|vet|list|get|mod\s+(tidy|download)|run|fmt|generate|install|clean|doc|env|version|tool)\b`, tags("go")),
+		NewPattern(`^gofmt\b`, tags("gofmt", "go")),
 		NewPattern(`^golangci-lint\b`, tags("golangci-lint", "go")),
 		NewPattern(`^ginkgo\b`, tags("ginkgo", "go")),
 

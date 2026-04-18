@@ -76,6 +76,7 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"jj diff", "jj diff -r @", "jj read op"},
 		{"jj show", "jj show @", "jj read op"},
 		{"jj status", "jj status", "jj read op"},
+		{"jj st", "jj st", "jj read op"},
 		{"jj file list", "jj file list", "jj read op"},
 		{"jj bookmark list", "jj bookmark list", "jj read op"},
 		{"jj op log", "jj op log", "jj read op"},
@@ -233,6 +234,12 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"cp -nr", "cp -nr src/ dest/", "cp -n"},
 		{"ln -s", "ln -s target link", "ln -s"},
 		{"ln -sn", "ln -sn target link", "ln -s"},
+		{"open image", `open "/tmp/lucide-icons-pr.png"`, "open media"},
+		{"open localhost page", "open http://localhost:9323", "open media"},
+		{"open pdf", `open "/tmp/playwright-report.pdf"`, "open media"},
+		{"open svg", `open "frontend/tmp/diagram.svg"`, "open media"},
+		{"xdg-open loopback page", "xdg-open http://127.0.0.1:4173/report", "open media"},
+		{"xdg-open video", "xdg-open ./demo.webm", "open media"},
 		{"var assignment", "FOO=bar", "var assignment"},
 
 		// --- kubectl ---
@@ -274,6 +281,7 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"gh issue list", "gh issue list", "gh read op"},
 		{"gh run view", "gh run view 789", "gh read op"},
 		{"gh release list", "gh release list", "gh read op"},
+		{"gh image", "gh image --help", "gh image"},
 		{"gh pr create", "gh pr create --title 'fix' --body 'desc'", "gh pr create"},
 		{"gh pr merge", "gh pr merge 123", "gh write op"},
 		{"gh pr close", "gh pr close 123", "gh write op"},
@@ -288,6 +296,7 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"golangci-lint", "golangci-lint run ./...", "golangci-lint"},
 		{"go build", "go build ./...", "go"},
 		{"go test", "go test -v ./...", "go"},
+		{"gofmt", `gofmt -w "internal/github/normalize.go"`, "gofmt"},
 		{"go vet", "go vet ./...", "go"},
 		{"go list", "go list -m all", "go"},
 		{"go get", "go get golang.org/x/tools", "go"},
@@ -894,6 +903,22 @@ func TestAskDecision(t *testing.T) {
 	})
 }
 
+func TestAllowDecision(t *testing.T) {
+	t.Run("open localhost page has allow decision", func(t *testing.T) {
+		r := evaluateAll("open http://localhost:9323")
+		require.NotNil(t, r)
+		assert.Equal(t, "open media", r.reason)
+		assert.Equal(t, "allow", r.decision)
+	})
+
+	t.Run("xdg-open loopback page has allow decision", func(t *testing.T) {
+		r := evaluateAll("xdg-open http://127.0.0.1:4173/report")
+		require.NotNil(t, r)
+		assert.Equal(t, "open media", r.reason)
+		assert.Equal(t, "allow", r.decision)
+	})
+}
+
 func TestNoOpinionDecision(t *testing.T) {
 	// Commands with WithDecision("") return a result with empty decision.
 	// The hook exits silently (no output), letting the next hook in the chain handle it.
@@ -915,6 +940,27 @@ func TestNoOpinionDecision(t *testing.T) {
 		r := evaluateAll("gh pr create --title 'fix'")
 		require.NotNil(t, r)
 		assert.Equal(t, "gh pr create", r.reason)
+		assert.Empty(t, r.decision)
+	})
+
+	t.Run("open non-media file is no-opinion", func(t *testing.T) {
+		r := evaluateAll("open README.md")
+		require.NotNil(t, r)
+		assert.Equal(t, "open media", r.reason)
+		assert.Empty(t, r.decision)
+	})
+
+	t.Run("xdg-open remote URL is no-opinion", func(t *testing.T) {
+		r := evaluateAll("xdg-open https://example.com/demo.mp4")
+		require.NotNil(t, r)
+		assert.Equal(t, "open media", r.reason)
+		assert.Empty(t, r.decision)
+	})
+
+	t.Run("open legacy image format is no-opinion", func(t *testing.T) {
+		r := evaluateAll("open screenshot.bmp")
+		require.NotNil(t, r)
+		assert.Equal(t, "open media", r.reason)
 		assert.Empty(t, r.decision)
 	})
 
