@@ -1076,6 +1076,20 @@ func TestNoOpinionDecision(t *testing.T) {
 		assert.Equal(t, "deny", r.decision)
 	})
 
+	t.Run("git commit short option cluster ending in n denied", func(t *testing.T) {
+		r := evaluateAll(`git commit -an -m "skip hooks"`)
+		require.NotNil(t, r)
+		assert.Equal(t, "git commit --no-verify", r.reason)
+		assert.Equal(t, "deny", r.decision)
+	})
+
+	t.Run("git commit short option cluster starting with n denied", func(t *testing.T) {
+		r := evaluateAll(`git commit -nm "skip hooks"`)
+		require.NotNil(t, r)
+		assert.Equal(t, "git commit --no-verify", r.reason)
+		assert.Equal(t, "deny", r.decision)
+	})
+
 	t.Run("git -C path commit --no-verify denied", func(t *testing.T) {
 		r := evaluateAll(`git -C /repo commit --no-verify -m "skip hooks"`)
 		require.NotNil(t, r)

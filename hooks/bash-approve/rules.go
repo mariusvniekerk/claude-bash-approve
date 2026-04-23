@@ -97,7 +97,7 @@ func commandPatterns() []pattern {
 			WithDenyReason("BLOCKED: git stash is banned. It destroys work and causes merge conflicts. Make targeted edits instead.")),
 		NewPattern(`^git\s+(-C\s+\S+\s+)?revert\b`, tags("git revert", "git destructive", "git"), WithDecision("deny"),
 			WithDenyReason("BLOCKED: git revert is banned. Use targeted edits to undo changes.")),
-		NewPattern(`^git\s+(-C\s+\S+\s+)?commit\b.*\s(--no-verify|-n)\b`, tags("git commit --no-verify", "git destructive", "git"), WithDecision("deny"),
+		NewPattern(`^git\s+(-C\s+\S+\s+)?commit\b.*\s(--no-verify|-[A-Za-mo-z]*n[A-Za-z]*)\b`, tags("git commit --no-verify", "git destructive", "git"), WithDecision("deny"),
 			WithDenyReason("BLOCKED: git commit --no-verify is banned. Do not bypass pre-commit hooks.")),
 		NewPattern(`^git\s+(-C\s+\S+\s+)?reset\s+--hard\b`, tags("git reset --hard", "git destructive", "git"), WithDecision("deny"),
 			WithDenyReason("BLOCKED: git reset --hard is banned. It destroys uncommitted work.")),
