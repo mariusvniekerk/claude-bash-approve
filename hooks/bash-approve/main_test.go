@@ -929,6 +929,28 @@ func TestNoOpinionDecision(t *testing.T) {
 		assert.Empty(t, r.decision)
 	})
 
+	t.Run("git push --no-verify denied with reason", func(t *testing.T) {
+		r := evaluateAll("git push --no-verify origin main")
+		require.NotNil(t, r)
+		assert.Equal(t, "git push --no-verify", r.reason)
+		assert.Equal(t, "deny", r.decision)
+		assert.Contains(t, r.denyReason, "git push --no-verify is banned")
+	})
+
+	t.Run("git push trailing --no-verify denied", func(t *testing.T) {
+		r := evaluateAll("git push origin main --no-verify")
+		require.NotNil(t, r)
+		assert.Equal(t, "git push --no-verify", r.reason)
+		assert.Equal(t, "deny", r.decision)
+	})
+
+	t.Run("git -C path push --no-verify denied", func(t *testing.T) {
+		r := evaluateAll("git -C /repo push --no-verify origin main")
+		require.NotNil(t, r)
+		assert.Equal(t, "git push --no-verify", r.reason)
+		assert.Equal(t, "deny", r.decision)
+	})
+
 	t.Run("jj git push is no-opinion", func(t *testing.T) {
 		r := evaluateAll("jj git push")
 		require.NotNil(t, r)
@@ -1030,6 +1052,35 @@ func TestNoOpinionDecision(t *testing.T) {
 		assert.Equal(t, "git revert", r.reason)
 		assert.Equal(t, "deny", r.decision)
 		assert.Contains(t, r.denyReason, "git revert is banned")
+	})
+
+	t.Run("git commit --no-verify denied with reason", func(t *testing.T) {
+		r := evaluateAll(`git commit --no-verify -m "skip hooks"`)
+		require.NotNil(t, r)
+		assert.Equal(t, "git commit --no-verify", r.reason)
+		assert.Equal(t, "deny", r.decision)
+		assert.Contains(t, r.denyReason, "git commit --no-verify is banned")
+	})
+
+	t.Run("git commit trailing --no-verify denied", func(t *testing.T) {
+		r := evaluateAll(`git commit -m "skip hooks" --no-verify`)
+		require.NotNil(t, r)
+		assert.Equal(t, "git commit --no-verify", r.reason)
+		assert.Equal(t, "deny", r.decision)
+	})
+
+	t.Run("git commit -n denied", func(t *testing.T) {
+		r := evaluateAll(`git commit -n -m "skip hooks"`)
+		require.NotNil(t, r)
+		assert.Equal(t, "git commit --no-verify", r.reason)
+		assert.Equal(t, "deny", r.decision)
+	})
+
+	t.Run("git -C path commit --no-verify denied", func(t *testing.T) {
+		r := evaluateAll(`git -C /repo commit --no-verify -m "skip hooks"`)
+		require.NotNil(t, r)
+		assert.Equal(t, "git commit --no-verify", r.reason)
+		assert.Equal(t, "deny", r.decision)
 	})
 
 	t.Run("git reset --hard denied with reason", func(t *testing.T) {
