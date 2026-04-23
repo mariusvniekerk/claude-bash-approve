@@ -83,12 +83,15 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"jj new", "jj new main", "jj write op"},
 		{"jj commit", "jj commit -m 'my change'", "jj write op"},
 		{"jj describe", "jj describe -m 'update description'", "jj write op"},
+		{"jj desc", "jj desc -r @ -m 'update description'", "jj write op"},
 		{"jj squash", "jj squash", "jj write op"},
 		{"jj bookmark create", "jj bookmark create my-feature -r @", "jj write op"},
 		{"jj bookmark set", "jj bookmark set my-feature -r @", "jj write op"},
 		{"jj bookmark delete", "jj bookmark delete old-branch", "jj write op"},
 		{"jj bookmark move", "jj bookmark move my-feature --to @", "jj write op"},
 		{"jj git fetch", "jj git fetch", "jj write op"},
+		{"jj git import", "jj git import", "jj write op"},
+		{"jj git export", "jj git export", "jj write op"},
 		{"jj rebase", "jj rebase -d main", "jj write op"},
 		{"jj edit", "jj edit @-", "jj write op"},
 		{"jj abandon", "jj abandon @", "jj write op"},
@@ -213,6 +216,7 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"false", "false", "shell builtin"},
 		{"exit 0", "exit 0", "shell builtin"},
 		{"wait", "wait", "shell builtin"},
+		{"test", "test -d .jj", "shell builtin"},
 		{"seq", "seq 1 10", "read-only"},
 		{"kill pid", "kill 12345", "process mgmt"},
 		{"pkill", "pkill -f myprocess", "process mgmt"},
@@ -570,6 +574,7 @@ func TestEvaluate_Chains(t *testing.T) {
 		{"roborev show piped to jq", `roborev show --job 123 --json 2>&1 | jq '{job_id: .job_id}'`, "roborev show | read-only"},
 		{"git add && commit", `git add internal/agent/agent.go internal/agent/agent_test_helpers.go cmd/roborev/main.go && git commit -m "feat: register kilo in agent fallback list and help text"`, "git write op | git write op"},
 		{"gcloud logging piped", `gcloud logging read 'severity="ERROR"' --project=my-proj --limit=50 2>&1 | head -30`, "gcloud logging | read-only"},
+		{"jj probe fallback", "test -d .jj && jj st || git status --short", "shell builtin | jj read op | git read op"},
 	}
 
 	for _, tt := range tests {

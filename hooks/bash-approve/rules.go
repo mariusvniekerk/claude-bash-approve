@@ -109,7 +109,7 @@ func commandPatterns() []pattern {
 
 		// jj (Jujutsu)
 		NewPattern(`^jj\s+(log|diff|show|status|st|file\s+(list|show)|op\s+log|config\s+(list|get)|bookmark\s+list|branch\s+list)\b`, tags("jj read op", "jj")),
-		NewPattern(`^jj\s+(new|commit|describe|squash|edit|abandon|restore|rebase|split|bookmark\s+(create|delete|forget|move|rename|set|track|untrack)|branch\s+(create|delete|forget|move|rename|set|track|untrack)|git\s+fetch)\b`, tags("jj write op", "jj")),
+		NewPattern(`^jj\s+(new|commit|describe|desc|squash|edit|abandon|restore|rebase|split|bookmark\s+(create|delete|forget|move|rename|set|track|untrack)|branch\s+(create|delete|forget|move|rename|set|track|untrack)|git\s+(fetch|import|export))\b`, tags("jj write op", "jj")),
 		NewPattern(`^jj\s+git\s+push\b`, tags("jj git push", "jj"), WithDecision("")),
 
 		// beads (bd)
@@ -152,6 +152,7 @@ func commandPatterns() []pattern {
 		NewPattern(`^ln\s+-[a-eg-zA-Z]*s[a-eg-zA-Z]*\s`, tags("ln -s", "shell")),
 		NewPattern(`^(open|xdg-open)\b`, tags("open media", "shell"), WithValidator(isMediaOpenTarget), WithValidatorFallback("")),
 		NewPattern(`^(true|false|exit(\s+\d+)?|wait)$`, tags("shell builtin", "shell")),
+		NewPattern(`^test\b`, tags("shell builtin", "shell")),
 		NewPattern(`^unset\b`, tags("shell vars", "shell")),
 		NewPattern(`^(pkill|kill)\b`, tags("process mgmt", "shell")),
 		NewPattern(`^eval\b`, tags("eval", "shell")),
