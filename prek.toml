@@ -40,17 +40,19 @@ hooks = [
     {
         id = "opencode-typecheck",
         name = "opencode typecheck",
-        entry = "bun run typecheck",
+        entry = "scripts/typecheck-opencode.sh",
         language = "system",
         pass_filenames = false,
-        always_run = true,
+        files = "^(opencode/|opencode-tester/|scripts/typecheck-opencode\\.sh$|package\\.json$|bun\\.lock$)",
+        require_serial = true,
     },
     {
         id = "pi-typecheck",
         name = "pi typecheck",
-        entry = "bun run --cwd packages/pi-bash-approve typecheck",
+        entry = "scripts/typecheck-pi.sh",
         language = "system",
         pass_filenames = false,
-        always_run = true,
+        files = "^(packages/pi-bash-approve/|scripts/typecheck-pi\\.sh$|package\\.json$|bun\\.lock$)",
+        require_serial = true,
     },
 ]

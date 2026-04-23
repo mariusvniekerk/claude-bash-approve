@@ -5,4 +5,4 @@ repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 
 cd "$repo_dir"
 bun install --frozen-lockfile
-bun run typecheck
+bun run --cwd packages/pi-bash-approve typecheck
