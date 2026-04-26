@@ -1677,6 +1677,16 @@ func TestBuildOpenCodeOutput(t *testing.T) {
 	})
 }
 
+func TestOpenCodeModeCLITelemetryUsesOpenCodeAgent(t *testing.T) {
+	stateRoot := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+
+	out := runApproveBashCLI(t, []string{"--opencode"}, []byte(`{"tool":"bash","command":"git status","cwd":"/repo"}`))
+	assert.JSONEq(t, `{"decision":"allow","reason":"git read op"}`, out)
+
+	assertTelemetryAgentForCommand(t, stateRoot, "git status", "opencode")
+}
+
 func writeTestConfig(t *testing.T, content string) string {
 	t.Helper()
 	dir := t.TempDir()

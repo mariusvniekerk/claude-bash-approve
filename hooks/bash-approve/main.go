@@ -1095,6 +1095,19 @@ type cliOptions struct {
 	configPath string
 }
 
+func telemetryAgentForMode(mode cliMode) string {
+	switch mode {
+	case modePi:
+		return "pi"
+	case modeOpenCode:
+		return "opencode"
+	case modeCodex:
+		return "codex"
+	default:
+		return "claude"
+	}
+}
+
 func parseCLIOptions(args []string) (cliOptions, error) {
 	fs := flag.NewFlagSet("approve-bash", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -1149,6 +1162,7 @@ func main() {
 	}
 
 	payload := string(rawInput)
+	agent := telemetryAgentForMode(opts.mode)
 
 	var cfg Config
 	if opts.configPath != "" {
@@ -1157,7 +1171,7 @@ func main() {
 		cfg, err = loadConfig()
 	}
 	if err != nil {
-		logDecision(db, payload, "", decisionDeny, err.Error())
+		logDecision(db, agent, payload, "", decisionDeny, err.Error())
 		if opts.mode == modePi {
 			emitPiOutput(buildPiErrorOutput("config-error", err.Error()))
 		}
@@ -1173,7 +1187,7 @@ func main() {
 	if opts.mode == modePi {
 		var data PiInput
 		if err := json.Unmarshal(rawInput, &data); err != nil {
-			logDecision(db, payload, "", "error", "invalid pi input")
+			logDecision(db, agent, payload, "", "error", "invalid pi input")
 			emitPiOutput(buildPiErrorOutput("invalid-input", "invalid pi input"))
 		}
 
@@ -1183,31 +1197,31 @@ func main() {
 			if strings.HasPrefix(err.Error(), "unsupported tool:") {
 				code = "unsupported-tool"
 			}
-			logDecision(db, payload, cmd, "error", err.Error())
+			logDecision(db, agent, payload, cmd, "error", err.Error())
 			emitPiOutput(buildPiErrorOutput(code, err.Error()))
 		}
 		out := buildPiOutput(data.Tool, r)
-		logDecision(db, payload, cmd, out.Decision, out.Reason)
+		logDecision(db, agent, payload, cmd, out.Decision, out.Reason)
 		emitPiOutput(out)
 	}
 
 	if opts.mode == modeOpenCode {
 		var data OpenCodeInput
 		if err := json.Unmarshal(rawInput, &data); err != nil {
-			logDecision(db, payload, "", "noop", "")
+			logDecision(db, agent, payload, "", "noop", "")
 			emitOpenCodeOutput(OpenCodeOutput{Decision: "noop"})
 		}
 
 		cmd, r := evaluateOpenCodeToolUse(data, cfg)
 		out := buildOpenCodeOutput(r)
-		logDecision(db, payload, cmd, out.Decision, out.Reason)
+		logDecision(db, agent, payload, cmd, out.Decision, out.Reason)
 		emitOpenCodeOutput(out)
 	}
 
 	if opts.mode == modeCodex {
 		var data CodexInput
 		if err := json.Unmarshal(rawInput, &data); err != nil {
-			logDecision(db, payload, "", "noop", "")
+			logDecision(db, agent, payload, "", "noop", "")
 			emitCodexOutput(CodexOutput{Continue: true})
 		}
 
@@ -1219,7 +1233,7 @@ func main() {
 			decision = out.HookSpecificOutput.Decision.Behavior
 			reason = out.HookSpecificOutput.Decision.Reason
 		}
-		logDecision(db, payload, cmd, decision, reason)
+		logDecision(db, agent, payload, cmd, decision, reason)
 		emitCodexOutput(out)
 	}
 
@@ -1230,16 +1244,16 @@ func main() {
 
 	cmd, r := evaluateToolUse(data, cfg)
 	if r == nil {
-		logDecision(db, payload, cmd, "no-opinion", "")
+		logDecision(db, agent, payload, cmd, "no-opinion", "")
 		os.Exit(0)
 	}
 	// No-opinion: recognized command but no decision — exit silently, next hook handles it.
 	if r.decision == "" {
-		logDecision(db, payload, cmd, "no-opinion", r.reason)
+		logDecision(db, agent, payload, cmd, "no-opinion", r.reason)
 		os.Exit(0)
 	}
 	if r.decision == decisionAsk {
-		logDecision(db, payload, cmd, "ask", r.reason)
+		logDecision(db, agent, payload, cmd, "ask", r.reason)
 		emitDecision(decisionAsk, r.reason)
 	}
 
@@ -1247,6 +1261,6 @@ func main() {
 	if r.decision == decisionDeny && r.denyReason != "" {
 		reason = r.denyReason
 	}
-	logDecision(db, payload, cmd, r.decision, reason)
+	logDecision(db, agent, payload, cmd, r.decision, reason)
 	emitDecision(r.decision, reason)
 }

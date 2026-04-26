@@ -20,6 +20,22 @@ func closeTestDB(t *testing.T, db *sql.DB) {
 	}
 }
 
+func assertTelemetryAgentForCommand(t *testing.T, stateRoot, command, want string) {
+	t.Helper()
+	path := filepath.Join(stateRoot, "claude-bash-approve", "telemetry.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { closeTestDB(t, db) }()
+
+	var agent string
+	if err := db.QueryRow(`SELECT agent FROM decisions WHERE command = ? ORDER BY id DESC LIMIT 1`, command).Scan(&agent); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, want, agent)
+}
+
 func TestTelemetryDBPathUsesXDGStateHome(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", "/tmp/xdg-state")
 
@@ -87,6 +103,49 @@ func TestLegacyTelemetryDBPathReturnsFalseWhenExecutableUnavailable(t *testing.T
 	if ok {
 		t.Fatal("expected no legacy path")
 	}
+}
+
+func TestInitTelemetrySchemaBackfillsAgentOnExistingDecisionRows(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { closeTestDB(t, db) }()
+	if _, err := db.Exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, command TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO decisions(command) VALUES ('git status')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if !initTelemetrySchema(db) {
+		t.Fatal("expected schema initialization")
+	}
+
+	var agent string
+	if err := db.QueryRow(`SELECT agent FROM decisions WHERE command = 'git status'`).Scan(&agent); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "claude", agent)
+}
+
+func TestLogDecisionPersistsAgent(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { closeTestDB(t, db) }()
+	if !initTelemetrySchema(db) {
+		t.Fatal("expected schema initialization")
+	}
+
+	logDecision(db, "pi", `{"tool":"bash"}`, "git status", decisionAllow, "git read op")
+
+	var agent string
+	if err := db.QueryRow(`SELECT agent FROM decisions WHERE command = 'git status'`).Scan(&agent); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "pi", agent)
 }
 
 func TestSQLiteSidecarsIncludesPresentFiles(t *testing.T) {

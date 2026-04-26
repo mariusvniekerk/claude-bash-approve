@@ -63,6 +63,16 @@ func TestPiMode_CLIInvalidInputReturnsPiError(t *testing.T) {
 	assert.JSONEq(t, `{"version":1,"kind":"error","error":{"code":"invalid-input","message":"invalid pi input"}}`, out)
 }
 
+func TestPiMode_CLITelemetryUsesPiAgent(t *testing.T) {
+	stateRoot := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+
+	out := runApproveBashCLI(t, []string{"--pi"}, []byte(`{"tool":"bash","command":"git status","cwd":"/repo"}`))
+	assert.JSONEq(t, `{"version":1,"kind":"decision","tool":"bash","decision":"allow","reason":"git read op"}`, out)
+
+	assertTelemetryAgentForCommand(t, stateRoot, "git status", "pi")
+}
+
 func TestPiMode_ConfigPathError(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing.yaml")
 	out := runPiModeWithConfigPathForTest(t, missing, PiInput{Tool: "bash", Command: "git status", Cwd: t.TempDir()})

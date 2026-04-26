@@ -231,11 +231,48 @@ func initTelemetrySchema(db *sql.DB) bool {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS decisions (
 		id       INTEGER PRIMARY KEY,
 		ts       TEXT DEFAULT (datetime('now')),
+		agent    TEXT DEFAULT 'claude',
 		payload  TEXT,
 		command  TEXT,
 		decision TEXT,
 		reason   TEXT
 	)`)
+	if err != nil {
+		return false
+	}
+	if !ensureTelemetryColumn(db, "agent", "TEXT DEFAULT 'claude'") {
+		return false
+	}
+	_, err = db.Exec(`UPDATE decisions SET agent = 'claude' WHERE agent IS NULL OR agent = ''`)
+	return err == nil
+}
+
+func ensureTelemetryColumn(db *sql.DB, name, definition string) bool {
+	rows, err := db.Query(`PRAGMA table_info(decisions)`)
+	if err != nil {
+		return false
+	}
+	defer rows.Close() //nolint:errcheck // best-effort telemetry validation
+
+	for rows.Next() {
+		var cid int
+		var columnName string
+		var columnType string
+		var notNull int
+		var defaultValue sql.NullString
+		var primaryKey int
+		if err := rows.Scan(&cid, &columnName, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return false
+		}
+		if columnName == name {
+			return rows.Err() == nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false
+	}
+
+	_, err = db.Exec(`ALTER TABLE decisions ADD COLUMN ` + name + ` ` + definition)
 	return err == nil
 }
 
@@ -354,10 +391,10 @@ func openTelemetryDB() *sql.DB {
 }
 
 // logDecision inserts a telemetry row. Silently ignores all errors.
-func logDecision(db *sql.DB, payload, command, decision, reason string) {
+func logDecision(db *sql.DB, agent, payload, command, decision, reason string) {
 	if db == nil {
 		return
 	}
-	_, _ = db.Exec(`INSERT INTO decisions (payload, command, decision, reason) VALUES (?, ?, ?, ?)`,
-		payload, command, decision, reason)
+	_, _ = db.Exec(`INSERT INTO decisions (agent, payload, command, decision, reason) VALUES (?, ?, ?, ?, ?)`,
+		agent, payload, command, decision, reason)
 }
