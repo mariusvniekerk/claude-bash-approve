@@ -143,6 +143,33 @@ func validateEnvVarNames(names []string, _ evalContext) *result {
 	return nil
 }
 
+// validateStandaloneAssignNames is the lenient counterpart used by
+// standalone assignments (`FOO=bar` with no command on the same line).
+// Hard-deny / ask-exact / LD_*/DYLD_* still flag dangerous names, but
+// unknown names auto-approve — bash convention treats lowercase locals
+// like `hm_src=...` and most uppercase project-specific knobs as benign,
+// and the strict allowlist would otherwise prompt on every one of them.
+// Names that don't match any of the dangerous lists return nil.
+func validateStandaloneAssignNames(names []string) *result {
+	for _, name := range names {
+		if envHardDeny[name] {
+			return &result{
+				decision:   decisionDeny,
+				denyReason: "BLOCKED: env var " + name + " can subvert command execution. Use a safer alternative.",
+			}
+		}
+	}
+	for _, name := range names {
+		if envAskExact[name] {
+			return &result{decision: decisionAsk}
+		}
+		if strings.HasPrefix(name, "LD_") || strings.HasPrefix(name, "DYLD_") {
+			return &result{decision: decisionAsk}
+		}
+	}
+	return nil
+}
+
 // isSafeEnvVarsWrapper parses the matched env-vars wrapper prefix and runs
 // validateEnvVarNames on the extracted KEYs. The matched prefix has the form
 // "K1=v1 K2=v2 " — values cannot contain whitespace (regex requires \s+ between

@@ -1,8 +1,6 @@
 package main
 
 import (
-	"strings"
-
 	"mvdan.cc/sh/v3/syntax"
 )
 
@@ -40,9 +38,14 @@ var findDangerousFlags = map[string]bool{
 // isFindSafe validates a find invocation by checking -exec/-execdir
 // commands through the normal evaluation pipeline. Returns false (→ ask
 // via validateFallback) if any embedded command is unrecognized, if a
-// destructive action is present, if -execdir / -okdir is used (cwd
-// changes at runtime can't be modeled), or if an -exec template contains
-// the `{}` placeholder (find substitutes each matched path at runtime).
+// destructive action is present, or if -execdir / -okdir is used (cwd
+// changes at runtime can't be modeled).
+//
+// `{}` placeholders are passed through to the evaluator as literal
+// arguments. Read-only inner commands (cat, rg, wc, grep, …) treat the
+// substituted path the same as any other path argument and stay
+// auto-approve. Mutating commands (rm, mv, plain cp, tee, …) don't
+// match the read-only patterns, so they still drop to ask.
 func isFindSafe(args []*syntax.Word, ctx evalContext) bool {
 	if len(args) < 2 {
 		return true
@@ -71,7 +74,6 @@ func isFindSafe(args []*syntax.Word, ctx evalContext) bool {
 		// Collect the command between -exec and the terminator (; or +).
 		i++
 		var cmdWords []*syntax.Word
-		hasPlaceholder := false
 		for i < len(args) {
 			part := wordLiteral(args[i])
 			if part == "" {
@@ -80,17 +82,11 @@ func isFindSafe(args []*syntax.Word, ctx evalContext) bool {
 			if part == ";" || part == "+" {
 				break
 			}
-			if strings.Contains(part, "{}") {
-				hasPlaceholder = true
-			}
 			cmdWords = append(cmdWords, args[i])
 			i++
 		}
 
 		if len(cmdWords) == 0 {
-			return false
-		}
-		if hasPlaceholder {
 			return false
 		}
 

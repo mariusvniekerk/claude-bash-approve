@@ -171,4 +171,43 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 		require.NotNil(t, r)
 		assert.Equal(t, decisionDeny, r.decision)
 	})
+
+	// Standalone assignments (no command on the same line) only flag
+	// dangerous names. Unknown names auto-approve so multi-line scripts
+	// like `hm_src=/path; rg ...` don't prompt on every benign local.
+	t.Run("standalone unknown lowercase allows", func(t *testing.T) {
+		r := evaluateAll("hm_src=/nix/store/x")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("standalone unknown uppercase allows", func(t *testing.T) {
+		r := evaluateAll("MY_PROJECT_VAR=foo")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("standalone LD_PRELOAD still denies", func(t *testing.T) {
+		r := evaluateAll("LD_PRELOAD=/tmp/evil")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionDeny, r.decision)
+	})
+
+	t.Run("standalone PATH still asks", func(t *testing.T) {
+		r := evaluateAll("PATH=/tmp:$PATH")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("standalone LD_LIBRARY_PATH still asks", func(t *testing.T) {
+		r := evaluateAll("LD_LIBRARY_PATH=/opt/lib")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("multi-line standalone + read-only chain allows", func(t *testing.T) {
+		r := evaluateAll("hm_src=/nix/store/x\nrg pat \"$hm_src/y\" 2>/dev/null | head -30")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
 }

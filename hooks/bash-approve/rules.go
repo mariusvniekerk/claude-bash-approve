@@ -107,7 +107,7 @@ func wrapperPatterns() []pattern {
 func commandPatterns() []pattern {
 	return []pattern{
 		// git
-		NewPattern(`^git\s+(-C\s+\S+\s+)?(diff|log|status|show|branch|stash\s+list|bisect|worktree\s+list|fetch|ls-files|ls-remote|rev-parse|describe|blame|grep|check-ignore|shortlog|name-rev|cat-file)\b`, tags("git read op", "git")),
+		NewPattern(`^git\s+(-C\s+\S+\s+)?(diff|log|status|show|branch|stash\s+list|bisect|worktree\s+list|fetch|ls-files|ls-remote|ls-tree|rev-parse|describe|blame|grep|check-ignore|shortlog|name-rev|cat-file)\b`, tags("git read op", "git")),
 		// git destructive ops — blocked by default (matches before write ops)
 		NewPattern(`^git\s+(-C\s+\S+\s+)?stash\b`, tags("git stash", "git destructive", "git"), WithDecision("deny"),
 			WithDenyReason("BLOCKED: git stash is banned. It destroys work and causes merge conflicts. Make targeted edits instead.")),
@@ -159,10 +159,24 @@ func commandPatterns() []pattern {
 		NewPattern(`^mise\s+(run|exec|install|use|env|--version|which|search|activate|list|ls|doctor|trust|reshim|settings|lock)\b`, tags("mise")),
 		NewPattern(`^mise\s+approve\b`, tags("mise")),
 
+		// nix / nh
+		NewPattern(`^nix\s+(build|eval|log|path-info|why-depends)\b`, tags("nix")),
+		NewPattern(`^nix\s+(run|shell|develop)\b`, tags("nix"), WithValidator(isNixRunShellSafe)),
+		NewPattern(`^nix\s+flake\s+(show|metadata|info|update|lock|prefetch|archive)\b`, tags("nix flake read", "nix")),
+		NewPattern(`^nix-build\b`, tags("nix-build", "nix")),
+		NewPattern(`^nix-shell\b`, tags("nix-shell", "nix"), WithValidator(isNixOldShellSafe)),
+		NewPattern(`^nix-store\s+(-q|--query)\b`, tags("nix-store query", "nix")),
+		NewPattern(`^nh\s+(os|home|darwin)\s+build\b`, tags("nh build", "nh")),
+
+		// pixi
+		NewPattern(`^pixi\s+run\b`, tags("pixi run", "pixi"), WithValidator(isPixiRunSafe)),
+		NewPattern(`^pixi\s+(list|tree|search|info|shell-hook|task\s+list|--version|--help)\b`, tags("pixi read", "pixi")),
+
 		// shell
 		NewPattern(`^rm\s+(-[a-zA-Z]*r[a-zA-Z]*|--recursive)\b`, tags("rm -r", "shell destructive", "shell"), WithDecision("deny"),
 			WithDenyReason("BLOCKED: rm -r is banned. Remove specific files only, not entire directory trees.")),
-		NewPattern(`^(ls|cat|head|tail|wc|grep|rg|file|which|pwd|du|df|sort|uniq|cut|tr|xxd|od|hexdump|sqlite3|diff|stat|realpath|basename|dirname|readlink|md5sum|sha256sum|shasum|lsof|ps|pgrep|jq|yq|id|whoami|hostname|uname|date|env|seq)\b`, tags("read-only", "shell")),
+		NewPattern(`^(ls|cat|head|tail|wc|grep|rg|file|which|pwd|du|df|sort|uniq|cut|tr|xxd|od|hexdump|sqlite3|diff|cmp|comm|stat|realpath|basename|dirname|readlink|md5sum|sha256sum|shasum|b2sum|b3sum|lsof|ps|pgrep|jq|yq|id|whoami|hostname|uname|date|env|seq|tac|rev|column|nl|paste|join|expand|unexpand|fold|fmt|strings|bat|bc|dc|expr|dig|host|nslookup|netstat|free|nproc|printenv|groups|pv|xzcat|bzcat|zcat|lsblk)\b`, tags("read-only", "shell")),
+		NewPattern(`^(fd|fdfind)\b`, tags("fd", "shell"), WithValidator(isFdSafe)),
 		NewPattern(`^sed\b`, tags("sed", "shell"), WithValidator(isSedSafe)),
 		NewPattern(`^awk\b`, tags("awk", "shell"), WithValidator(isAwkSafe)),
 		NewPattern(`^tee\b`, tags("tee", "shell"), WithValidator(isTeeInRepo)),

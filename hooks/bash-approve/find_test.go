@@ -24,11 +24,22 @@ func TestFindSafe(t *testing.T) {
 		{"find with size", "find . -size +1M -type f", "find"},
 		{"find with mtime", "find . -mtime -7 -name '*.log'", "find"},
 
-		// -exec with safe commands and no `{}` placeholder runs once
-		// per match with no argument substitution; the validator can
-		// model that and allow.
+		// -exec with safe commands runs them per match. The inner
+		// command is evaluated through the normal pipeline; if it
+		// would auto-approve standalone, it auto-approves under -exec
+		// regardless of whether it uses the `{}` placeholder.
 		{"find exec true", "find . -name '*.go' -exec true \\;", "find"},
 		{"find exec git status no placeholder", "find . -name '*.go' -exec git status \\;", "find"},
+		{"find exec wc placeholder", "find . -name '*.go' -exec wc -l {} \\;", "find"},
+		{"find exec git diff placeholder", "find . -name '*.go' -exec git diff {} \\;", "find"},
+		{"find exec echo placeholder", "find . -type f -exec echo {} \\;", "find"},
+		{"find exec cat placeholder", "find . -name 'README*' -exec cat {} \\;", "find"},
+		{"find exec head placeholder", "find . -name '*.log' -exec head -20 {} \\;", "find"},
+		{"find exec grep placeholder", "find . -name '*.py' -exec grep -l TODO {} \\;", "find"},
+		{"find exec rg placeholder batch", "find . -name '*.go' -exec rg -h pattern {} +", "find"},
+		{"find exec wc batch placeholder", "find . -name '*.go' -exec wc -l {} +", "find"},
+		{"find multiple safe execs placeholder", "find . -name '*.go' -exec wc -l {} \\; -exec head -1 {} \\;", "find"},
+		{"find complex then exec placeholder", "find . -maxdepth 3 -type f -name '*.go' -not -path '*/vendor/*' -exec cat {} \\;", "find"},
 	}
 
 	for _, tt := range tests {
@@ -79,19 +90,6 @@ func TestFindUnsafe(t *testing.T) {
 		// space must not be reassembled as two argv elements.
 		{"find exec quoted command with space", `find . -exec 'git status' {} \;`},
 
-		// `{}` is replaced with each matched path at runtime; the
-		// validator cannot model the substituted path, so any inner
-		// command that uses `{}` must ask even if it looks read-only.
-		{"find exec wc placeholder", "find . -name '*.go' -exec wc -l {} \\;"},
-		{"find exec git diff placeholder", "find . -name '*.go' -exec git diff {} \\;"},
-		{"find exec echo placeholder", "find . -type f -exec echo {} \\;"},
-		{"find exec cat placeholder", "find . -name 'README*' -exec cat {} \\;"},
-		{"find exec head placeholder", "find . -name '*.log' -exec head -20 {} \\;"},
-		{"find exec grep placeholder", "find . -name '*.py' -exec grep -l TODO {} \\;"},
-		{"find exec batch placeholder", "find . -name '*.go' -exec wc -l {} +"},
-		{"find multiple execs placeholder", "find . -name '*.go' -exec wc -l {} \\; -exec head -1 {} \\;"},
-		{"find complex then exec placeholder", "find . -maxdepth 3 -type f -name '*.go' -not -path '*/vendor/*' -exec cat {} \\;"},
-
 		// -execdir / -okdir change cwd to the matched file's directory;
 		// the validator can't model the changed cwd so they always ask.
 		{"find execdir grep", "find . -name '*.py' -execdir grep TODO {} +"},
@@ -126,10 +124,14 @@ func TestFindXargsNested(t *testing.T) {
 		assert.Equal(t, "allow", r.decision)
 	})
 
-	t.Run("find exec with placeholder asks", func(t *testing.T) {
+	t.Run("find exec with safe xargs cat allows", func(t *testing.T) {
+		// xargs -0 cat {} is a chain of read-only operations: the
+		// outer find's {} is a filename; xargs appends stdin records
+		// to the cat invocation. cat is in xargsSafeAppendCommands,
+		// so the inner xargs validator accepts.
 		r := evaluateAll(`find . -name '*.txt' -exec xargs -0 cat {} \;`)
 		require.NotNil(t, r)
-		assert.Equal(t, "ask", r.decision)
+		assert.Equal(t, "allow", r.decision)
 	})
 
 	t.Run("find exec xargs exec unsafe", func(t *testing.T) {

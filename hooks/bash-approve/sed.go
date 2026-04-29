@@ -18,10 +18,14 @@ var sedSpec = flagSpec{
 	},
 }
 
-// isSedSafe returns false (→ ask via validateFallback) when sed is
-// invoked in an in-place edit form. All other invocations pass.
-// args includes the command name at args[0]; flags start at args[1].
-func isSedSafe(args []*syntax.Word, _ evalContext) bool {
+// isSedSafe accepts read-only sed invocations unconditionally and accepts
+// in-place forms (`-i`, `-i.bak`, `--in-place`) only when every positional
+// file argument resolves inside the current repo. Returns false (→ ask
+// via validateFallback) for in-place edits that target paths outside the
+// repo, in-place invocations with no file argument, and any non-literal
+// flag form. args includes the command name at args[0]; flags start at
+// args[1].
+func isSedSafe(args []*syntax.Word, ctx evalContext) bool {
 	if len(args) < 2 {
 		return true
 	}
@@ -30,13 +34,41 @@ func isSedSafe(args []*syntax.Word, _ evalContext) bool {
 		// Dynamic flags/scripts can't be verified — be conservative.
 		return false
 	}
-	// `-i`, `-i.bak`, `-ni`, etc. all leave a literal `i` key in flags after
-	// short-cluster expansion (parseArgs splits combined shorts).
-	if _, ok := parsed.flags["i"]; ok {
+
+	// `-i`, `-i.bak`, `-ni`, etc. all leave a literal `i` key in flags
+	// after short-cluster expansion. `--in-place` / `--in-place=.bak`
+	// land under "in-place".
+	_, hasShortI := parsed.flags["i"]
+	_, hasLongI := parsed.flags["in-place"]
+	if !hasShortI && !hasLongI {
+		return true
+	}
+
+	// In-place edit. Determine which positionals are file paths:
+	// without -e/-f the first positional is the script.
+	files := parsed.positional
+	_, hasExpr := parsed.flags["expression"]
+	_, hasFile := parsed.flags["file"]
+	if !hasExpr && !hasFile {
+		if len(files) == 0 {
+			return false
+		}
+		files = files[1:]
+	}
+	if len(files) == 0 {
 		return false
 	}
-	// `--in-place` and `--in-place=.bak`.
-	if _, ok := parsed.flags["in-place"]; ok {
+	for _, w := range files {
+		path := wordLiteralPath(w)
+		if path == "" {
+			return false
+		}
+		if teeTargetInRepo(ctx.cwd, path) {
+			continue
+		}
+		if isSafeWriteTarget(path) {
+			continue
+		}
 		return false
 	}
 	return true

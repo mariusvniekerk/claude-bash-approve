@@ -29,6 +29,16 @@ func TestIsTeeInRepo(t *testing.T) {
 		assert.False(t, isTeeInRepo(args, evalContext{cwd: repo}))
 	})
 
+	t.Run("safe write prefix /tmp allows", func(t *testing.T) {
+		args := parseCallArgs(t, "tee /tmp/scratch.log")
+		assert.True(t, isTeeInRepo(args, evalContext{cwd: repo}))
+	})
+
+	t.Run("safe write prefix /var/tmp allows", func(t *testing.T) {
+		args := parseCallArgs(t, "tee /var/tmp/scratch.log")
+		assert.True(t, isTeeInRepo(args, evalContext{cwd: repo}))
+	})
+
 	t.Run("relative outside repo drops to ask", func(t *testing.T) {
 		args := parseCallArgs(t, "tee ../../../etc/passwd")
 		assert.False(t, isTeeInRepo(args, evalContext{cwd: repo}))
@@ -80,8 +90,15 @@ func TestEvaluate_TeeFlows(t *testing.T) {
 		assert.Equal(t, decisionAllow, r.decision)
 	})
 
-	t.Run("outside repo drops to ask", func(t *testing.T) {
+	t.Run("safe write prefix allowed end-to-end", func(t *testing.T) {
 		r := evaluateAllInDir("tee /tmp/output.log", repo)
+		require.NotNil(t, r)
+		assert.Equal(t, "tee", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("outside repo and safe prefixes drops to ask", func(t *testing.T) {
+		r := evaluateAllInDir("tee /etc/passwd", repo)
 		require.NotNil(t, r)
 		assert.Equal(t, "tee", r.reason)
 		assert.Equal(t, decisionAsk, r.decision)

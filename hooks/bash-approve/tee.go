@@ -53,9 +53,13 @@ func isTeeInRepo(args []*syntax.Word, ctx evalContext) bool {
 		return false
 	}
 	for _, p := range positional {
-		if !teeTargetInRepo(ctx.cwd, p) {
-			return false
+		if teeTargetInRepo(ctx.cwd, p) {
+			continue
 		}
+		if isSafeWriteTarget(p) {
+			continue
+		}
+		return false
 	}
 	return true
 }
