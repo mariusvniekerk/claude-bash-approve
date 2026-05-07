@@ -91,6 +91,7 @@ func NewPattern(re string, t []string, opts ...patternOption) pattern {
 func wrapperPatterns() []pattern {
 	return []pattern{
 		NewPattern(`^timeout\s+\d+\s+`, tags("timeout", "wrapper")),
+		NewPattern(`^time\s+`, tags("time", "wrapper")),
 		NewPattern(`^nice\s+(-n\s*\d+\s+)?`, tags("nice", "wrapper")),
 		NewPattern(`^env\s+`, tags("env", "wrapper")),
 		NewPattern(`^([A-Z_][A-Z0-9_]*=[^\s]*\s+)+`, tags("env vars", "wrapper"), WithWrapperValidator(isSafeEnvVarsWrapper)),
@@ -143,10 +144,11 @@ func commandPatterns() []pattern {
 		NewPattern(`^uvx\b`, tags("uvx", "python")),
 
 		// node
-		NewPattern(`^npm\s+(install|run|test|build|ci)\b`, tags("npm", "node")),
+		NewPattern(`^npm\s+audit\s+fix\b`, tags("npm audit fix", "node"), WithDecision("")),
+		NewPattern(`^npm\s+(install|run|test|build|ci|audit)\b`, tags("npm", "node")),
 		NewPattern(`^npx\b`, tags("npx", "node")),
 		NewPattern(`^node\s+-[ep]\b`, tags("node -e", "node")),
-		NewPattern(`^bun\s+(install|run|test|build|add|remove)\b`, tags("bun", "node")),
+		NewPattern(`^bun\s+(install|run|test|build|add|remove|-[ep]|--eval)\b`, tags("bun", "node")),
 		NewPattern(`^bunx\b`, tags("bunx", "node")),
 		NewPattern(`^vitest\b`, tags("vitest", "node")),
 
@@ -190,6 +192,8 @@ func commandPatterns() []pattern {
 		NewPattern(`^(open|xdg-open)\b`, tags("open media", "shell"), WithValidator(isMediaOpenTarget), WithValidatorFallback("")),
 		NewPattern(`^(true|false|exit(\s+\d+)?|wait)$`, tags("shell builtin", "shell")),
 		NewPattern(`^test\b`, tags("shell builtin", "shell")),
+		NewPattern(`^read\b`, tags("shell builtin", "shell")),
+		NewPattern(`^(-v|--help|--version)\b`, tags("lookup", "shell")),
 		NewPattern(`^unset\b`, tags("shell vars", "shell")),
 		NewPattern(`^(pkill|kill)\b`, tags("process mgmt", "shell")),
 		NewPattern(`^eval\b`, tags("eval", "shell")),
@@ -217,6 +221,7 @@ func commandPatterns() []pattern {
 		NewPattern(`^gh\s+image\b`, tags("gh image", "gh")),
 		NewPattern(`^gh\s+search\s+(code|repos|issues|prs|commits)\b`, tags("gh search", "gh")),
 		NewPattern(`^gh\s+repo\s+clone\b`, tags("gh repo clone", "gh")),
+		NewPattern(`^gh\s+auth\s+(status|token)\b`, tags("gh auth", "gh")),
 		NewPattern(`^gh\s+pr\s+create\b`, tags("gh pr create", "gh"), WithDecision("")),
 		NewPattern(`^gh\s+(pr\s+merge|pr\s+close|pr\s+reopen|pr\s+review|pr\s+edit)\b`, tags("gh write op", "gh")),
 		NewPattern(`^gh\s+api\b`, tags("gh api", "gh")),
@@ -229,6 +234,9 @@ func commandPatterns() []pattern {
 		NewPattern(`^gofmt\b`, tags("gofmt", "go")),
 		NewPattern(`^golangci-lint\b`, tags("golangci-lint", "go")),
 		NewPattern(`^ginkgo\b`, tags("ginkgo", "go")),
+		NewPattern(`^nilaway\b`, tags("nilaway", "go")),
+		NewPattern(`^(\./)?scripts/nilaway-changed-packages\.sh\b`, tags("nilaway", "go")),
+		NewPattern(`^bash\s+scripts/nilaway_changed_packages_test\.sh\b`, tags("nilaway", "go")),
 
 		// gcloud (Google Cloud CLI)
 		NewPattern(`^gcloud\s+logging\s+read\b`, tags("gcloud logging", "gcloud")),
@@ -262,6 +270,15 @@ func commandPatterns() []pattern {
 			WithDenyReason("BLOCKED: roborev tui is an interactive TUI that cannot run in a non-interactive shell.")),
 		NewPattern(`^roborev\s+(list|summary|wait|stream)\b`, tags("roborev read op", "roborev")),
 		NewPattern(`^roborev\b`, tags("roborev")),
+
+		// git-spice
+		NewPattern(`^git-spice\s+(-C\s+\S+\s+)?(--no-prompt\s+)?(log|auth|repo|branch|stack|upstack|downstack|rebase)\b`, tags("git-spice")),
+
+		// kata
+		NewPattern(`^kata\b`, tags("kata")),
+
+		// tmux
+		NewPattern(`^tmux\s+(list-sessions|ls|kill-session)\b`, tags("tmux")),
 
 		// pre-commit (prek)
 		NewPattern(`^(prek|pre-commit)\b`, tags("prek")),

@@ -128,12 +128,14 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"npm run build", "npm run build", "npm"},
 		{"npm test", "npm test", "npm"},
 		{"npm ci", "npm ci", "npm"},
+		{"npm audit", "npm audit", "npm"},
 		{"npx prettier", "npx prettier --write .", "npx"},
 		{"node -e", `node -e "console.log('hello')"`, "node -e"},
 		{"node -p", `node -p "1+1"`, "node -e"},
 		{"bun install", "bun install", "bun"},
 		{"bun run", "bun run dev", "bun"},
 		{"bun test", "bun test", "bun"},
+		{"bun eval", `bun -e "console.log(import.meta.resolve('@lucide/svelte'))"`, "bun"},
 		{"bunx", "bunx prettier --write .", "bunx"},
 
 		// --- Rust ecosystem ---
@@ -163,6 +165,7 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"mise approve", "mise approve", "mise"},
 		{"mise lock", "mise lock", "mise"},
 		{"mise lock dry-run", "mise lock --dry-run", "mise"},
+		{"time go run", "time go run ./cmd/agentsview pg push", "time+go"},
 
 		// --- Nix ---
 		{"nix build attr", "nix build '.#hello'", "nix"},
@@ -220,6 +223,7 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"which", "which python", "read-only"},
 		{"pwd", "pwd", "read-only"},
 		{"curl", "curl -s https://example.com", "curl"},
+		{"curl fail silent show error", "curl -fsS http://127.0.0.1:18080/api/v1/version", "curl"},
 		{"sort", "sort output.txt", "read-only"},
 		{"uniq", "uniq -c counts.txt", "read-only"},
 		{"cut", "cut -d: -f1 /etc/passwd", "read-only"},
@@ -287,6 +291,7 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"exit 0", "exit 0", "shell builtin"},
 		{"wait", "wait", "shell builtin"},
 		{"test", "test -d .jj", "shell builtin"},
+		{"read", "read -r session", "shell builtin"},
 		{"seq", "seq 1 10", "read-only"},
 		{"kill pid", "kill 12345", "process mgmt"},
 		{"pkill", "pkill -f myprocess", "process mgmt"},
@@ -315,6 +320,7 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"xdg-open loopback page", "xdg-open http://127.0.0.1:4173/report", "open media"},
 		{"xdg-open video", "xdg-open ./demo.webm", "open media"},
 		{"var assignment", "FOO=bar", "var assignment"},
+		{"command lookup", "command -v git-spice", "command+lookup"},
 
 		// --- kubectl ---
 		{"kubectl get pods", "kubectl get pods -n default", "kubectl read op"},
@@ -365,6 +371,7 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"gh search issues", "gh search issues 'bug'", "gh search"},
 		{"gh repo clone", "gh repo clone owner/repo", "gh repo clone"},
 		{"gh api", "gh api repos/foo/bar/pulls", "gh api"},
+		{"gh auth token", "gh auth token", "gh auth"},
 
 		// --- Go toolchain ---
 		{"golangci-lint", "golangci-lint run ./...", "golangci-lint"},
@@ -388,6 +395,10 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"ginkgo", "ginkgo -r ./...", "ginkgo"},
 		{"ginkgo parallel", "ginkgo -r --procs 4 ./...", "ginkgo"},
 		{"ginkgo focus", "ginkgo -r -focus 'describe filter' ./...", "ginkgo"},
+		{"nilaway", `nilaway -test=false -include-pkgs="github.com/wesm/agentsview" ./...`, "nilaway"},
+		{"time nilaway", `time nilaway -test=false -include-pkgs="github.com/wesm/agentsview" ./...`, "time+nilaway"},
+		{"nilaway changed packages script", "scripts/nilaway-changed-packages.sh internal/parser/parser.go", "nilaway"},
+		{"nilaway test script", `bash "scripts/nilaway_changed_packages_test.sh"`, "nilaway"},
 
 		// --- AWS ---
 		{"aws configure", "aws configure export-credentials --format env --profile thinknear", "aws"},
@@ -429,6 +440,21 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"roborev wait", "roborev wait 123", "roborev read op"},
 		{"roborev stream", "roborev stream", "roborev read op"},
 		{"roborev status", "roborev status", "roborev"},
+
+		// --- Git Spice ---
+		{"git-spice log", "git-spice log short", "git-spice"},
+		{"git-spice no prompt stack submit", "git-spice --no-prompt stack submit --fill --no-web", "git-spice"},
+		{"git-spice branch create", "git-spice branch create fix-kata-55-explicit-repo-upsert --no-commit", "git-spice"},
+
+		// --- Kata ---
+		{"kata ready", "kata ready", "kata"},
+		{"kata list", "kata list --status open --limit 30", "kata"},
+		{"kata close", "kata close 53", "kata"},
+
+		// --- tmux ---
+		{"tmux list sessions", "tmux list-sessions -F '#S #{pane_current_path}'", "tmux"},
+		{"tmux ls", "tmux ls", "tmux"},
+		{"tmux kill session", "tmux kill-session -t middleman-b902c58885f5477c", "tmux"},
 
 		// --- Ruby ecosystem ---
 		{"rspec", "rspec spec/models/user_spec.rb", "rspec"},
@@ -706,6 +732,7 @@ func TestStripWrappers(t *testing.T) {
 	}{
 		{"no wrapper", "pytest -x", "pytest -x", nil},
 		{"timeout", "timeout 30 pytest", "pytest", []string{"timeout"}},
+		{"time", "time go test ./...", "go test ./...", []string{"time"}},
 		{"env vars", "FOO=bar BAZ=1 make", "make", []string{"env vars"}},
 		{"stacked", "timeout 30 FOO=1 pytest", "pytest", []string{"timeout", "env vars"}},
 		{"venv", ".venv/bin/python script.py", "python script.py", []string{".venv"}},
@@ -1121,6 +1148,13 @@ func TestNoOpinionDecision(t *testing.T) {
 		r := evaluateAll("go mod init github.com/example/repo")
 		require.NotNil(t, r)
 		assert.Equal(t, "go mod init", r.reason)
+		assert.Empty(t, r.decision)
+	})
+
+	t.Run("npm audit fix is no-opinion", func(t *testing.T) {
+		r := evaluateAll("npm audit fix --package-lock-only")
+		require.NotNil(t, r)
+		assert.Equal(t, "npm audit fix", r.reason)
 		assert.Empty(t, r.decision)
 	})
 

@@ -91,7 +91,7 @@ var curlSpec = flagSpec{
 		'E': "cert", 'C': "continue-at", 'A': "user-agent",
 		's': "silent", 'S': "show-error", 'L': "location",
 		'v': "verbose", 'k': "insecure", 'I': "head", 'G': "get",
-		'e': "referer", 'w': "write-out",
+		'e': "referer", 'w': "write-out", 'f': "fail",
 	},
 	takesValue: map[string]bool{
 		"data": true, "data-raw": true, "data-binary": true, "data-urlencode": true,

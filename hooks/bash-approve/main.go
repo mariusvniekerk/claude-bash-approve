@@ -451,6 +451,16 @@ func evaluateCommand(cmd syntax.Command, ctx evalContext, wrapperPats, commandPa
 		return evaluateIfClause(c, ctx, wrapperPats, commandPats)
 	case *syntax.Subshell:
 		return evaluateBlock(c.Stmts, ctx, wrapperPats, commandPats, "subshell")
+	case *syntax.TimeClause:
+		if c.Stmt == nil {
+			return nil
+		}
+		r := evaluateStmt(c.Stmt, ctx, wrapperPats, commandPats)
+		if r == nil {
+			return nil
+		}
+		r.reason = "time+" + r.reason
+		return r
 	default:
 		// Reject func declarations, etc.
 		return nil

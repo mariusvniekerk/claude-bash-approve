@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -103,8 +104,7 @@ type copiedTelemetryFile struct {
 }
 
 func rollbackCopiedTelemetryFiles(files []copiedTelemetryFile) {
-	for i := len(files) - 1; i >= 0; i-- {
-		file := files[i]
+	for _, file := range slices.Backward(files) {
 		cleanupFiles([]string{file.temp})
 		if file.backup == "" {
 			if !file.hadExisting {
