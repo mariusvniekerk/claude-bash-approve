@@ -32,6 +32,18 @@ class InstallHelpersTest(unittest.TestCase):
             with mock.patch.dict(os.environ, {"HOME": str(home), "XDG_DATA_HOME": "relative"}, clear=False):
                 self.assertEqual(install.shared_runtime_root(), home / ".local" / "share" / "claude-bash-approve")
 
+    def test_ensure_codex_feature_enabled_migrates_deprecated_key(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.toml"
+            config_path.write_text("[features]\ncodex_hooks = true\nmulti_agent = true\n")
+
+            install.ensure_codex_feature_enabled(config_path)
+
+            text = config_path.read_text()
+            self.assertIn("hooks = true", text)
+            self.assertIn("multi_agent = true", text)
+            self.assertNotIn("codex_hooks", text)
+
 
 class InstallCLITestCase(unittest.TestCase):
     maxDiff = None
@@ -141,9 +153,9 @@ class CodexInstallTest(InstallCLITestCase):
         global_hooks = codex_root / "hooks.json"
 
         self.assertTrue((self.runtime_root / "approve-bash").is_file())
-        self.assertIn("codex_hooks = true", project_config.read_text())
+        self.assertIn("hooks = true", project_config.read_text())
         self.assertIn("multi_agent = true", global_config.read_text())
-        self.assertIn("codex_hooks = true", global_config.read_text())
+        self.assertIn("hooks = true", global_config.read_text())
         self.assertIn(str(self.runtime_root / "run-codex-hook.sh"), project_hooks.read_text())
         self.assertIn(str(self.runtime_root / "run-codex-hook.sh"), global_hooks.read_text())
 

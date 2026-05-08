@@ -87,7 +87,7 @@ cd claude-bash-approve
 python3 install.py install --target claude
 ```
 
-OpenCode installs write plugin files under project/global OpenCode config and point them at shared runtime hook. Codex installs enable `codex_hooks` and write `PermissionRequest` hook config pointing at shared runtime hook.
+OpenCode installs write plugin files under project/global OpenCode config and point them at shared runtime hook. Codex installs enable `hooks` and write `PermissionRequest` hook config pointing at shared runtime hook.
 
 TypeScript support for the OpenCode plugin is enforced via `bun --cwd opencode-tester run typecheck`.
 

@@ -295,28 +295,33 @@ def uninstall_opencode(scope: str, project_root: Path) -> None:
 
 FEATURES_HEADER_RE = re.compile(r"(?m)^\[features\]\s*$")
 CODEX_HOOKS_LINE_RE = re.compile(r"(?m)^\s*codex_hooks\s*=.*$")
+HOOKS_LINE_RE = re.compile(r"(?m)^\s*hooks\s*=.*$")
 
 
 def ensure_codex_feature_enabled(config_path: Path) -> None:
     if not config_path.exists():
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text("[features]\ncodex_hooks = true\n")
+        config_path.write_text("[features]\nhooks = true\n")
         return
 
     parsed = load_toml_file(config_path)
     features = parsed.get("features")
-    if isinstance(features, dict) and features.get("codex_hooks") is True:
+    text = config_path.read_text()
+    has_deprecated_key = CODEX_HOOKS_LINE_RE.search(text) is not None
+    if isinstance(features, dict) and features.get("hooks") is True and not has_deprecated_key:
         return
 
-    text = config_path.read_text()
-    if CODEX_HOOKS_LINE_RE.search(text):
-        updated = CODEX_HOOKS_LINE_RE.sub("codex_hooks = true", text, count=1)
+    if HOOKS_LINE_RE.search(text):
+        updated = HOOKS_LINE_RE.sub("hooks = true", text, count=1)
+        updated = CODEX_HOOKS_LINE_RE.sub("", updated)
+    elif CODEX_HOOKS_LINE_RE.search(text):
+        updated = CODEX_HOOKS_LINE_RE.sub("hooks = true", text, count=1)
     elif FEATURES_HEADER_RE.search(text):
-        updated = FEATURES_HEADER_RE.sub("[features]\ncodex_hooks = true", text, count=1)
+        updated = FEATURES_HEADER_RE.sub("[features]\nhooks = true", text, count=1)
     else:
         if text and not text.endswith("\n"):
             text += "\n"
-        updated = text + "[features]\ncodex_hooks = true\n"
+        updated = text + "[features]\nhooks = true\n"
 
     tomllib.loads(updated)
     config_path.write_text(updated)
@@ -326,7 +331,7 @@ def remove_codex_feature_if_trivial(config_path: Path) -> None:
     if not config_path.exists():
         return
     text = config_path.read_text()
-    updated = re.sub(r"(?m)^\s*codex_hooks\s*=\s*true\s*\n?", "", text)
+    updated = re.sub(r"(?m)^\s*(?:codex_hooks|hooks)\s*=\s*true\s*\n?", "", text)
     try:
         if updated.strip():
             tomllib.loads(updated)
