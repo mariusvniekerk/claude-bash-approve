@@ -22,12 +22,14 @@ There is also legacy compatibility for the common old path `~/.claude/hooks/bash
 
 ```sql
 CREATE TABLE decisions (
-    id       INTEGER PRIMARY KEY,
-    ts       TEXT DEFAULT (datetime('now')),  -- UTC
-    payload  TEXT,    -- full JSON input from Claude Code hook
-    command  TEXT,    -- the bash command string
-    decision TEXT,    -- allow | deny | ask | no-opinion
-    reason   TEXT     -- human-readable label(s), pipe-separated
+    id             INTEGER PRIMARY KEY,
+    ts             TEXT DEFAULT (datetime('now')),  -- UTC
+    agent          TEXT DEFAULT 'claude',            -- claude | codex | opencode | pi
+    binary_version TEXT DEFAULT 'unknown',           -- claude-bash-approve binary version
+    payload        TEXT,                             -- full JSON input from Claude Code hook
+    command        TEXT,                             -- the bash command string
+    decision       TEXT,                             -- allow | deny | ask | no-opinion
+    reason         TEXT                              -- human-readable label(s), pipe-separated
 );
 ```
 

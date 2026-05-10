@@ -40,6 +40,10 @@ def opencode_plugin_template() -> Path:
     return repo_root() / "opencode" / "bash-approve.plugin.ts"
 
 
+def plugin_metadata_path() -> Path:
+    return repo_root() / ".claude-plugin" / "plugin.json"
+
+
 def absolute_xdg_dir(env_name: str, fallback: Path) -> Path:
     value = os.environ.get(env_name, "")
     if value:
@@ -118,6 +122,7 @@ def install_shared_runtime_bundle() -> Path:
         shutil.copy2(path, runtime_root / path.name)
     for name in ("go.mod", "go.sum"):
         shutil.copy2(source_hook_dir() / name, runtime_root / name)
+    shutil.copy2(plugin_metadata_path(), runtime_root / "plugin.json")
     for name in RUNTIME_FILES:
         dest = runtime_root / name
         shutil.copy2(source_hook_dir() / name, dest)

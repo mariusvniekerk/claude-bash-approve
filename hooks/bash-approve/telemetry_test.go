@@ -129,6 +129,30 @@ func TestInitTelemetrySchemaBackfillsAgentOnExistingDecisionRows(t *testing.T) {
 	assert.Equal(t, "claude", agent)
 }
 
+func TestInitTelemetrySchemaAddsBinaryVersionToExistingDecisionRows(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { closeTestDB(t, db) }()
+	if _, err := db.Exec(`CREATE TABLE decisions (id INTEGER PRIMARY KEY, command TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO decisions(command) VALUES ('git status')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if !initTelemetrySchema(db) {
+		t.Fatal("expected schema initialization")
+	}
+
+	var version string
+	if err := db.QueryRow(`SELECT binary_version FROM decisions WHERE command = 'git status'`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "unknown", version)
+}
+
 func TestLogDecisionPersistsAgent(t *testing.T) {
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "telemetry.db"))
 	if err != nil {
@@ -146,6 +170,79 @@ func TestLogDecisionPersistsAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Equal(t, "pi", agent)
+}
+
+func TestLogDecisionPersistsBinaryVersion(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "approve-bash")
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"version":"1.2.3"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldExecutable := telemetryExecutable
+	telemetryExecutable = func() (string, error) { return exe, nil }
+	t.Cleanup(func() { telemetryExecutable = oldExecutable })
+
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { closeTestDB(t, db) }()
+	if !initTelemetrySchema(db) {
+		t.Fatal("expected schema initialization")
+	}
+
+	logDecision(db, "pi", `{"tool":"bash"}`, "git status", decisionAllow, "git read op")
+
+	var version string
+	if err := db.QueryRow(`SELECT binary_version FROM decisions WHERE command = 'git status'`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "1.2.3", version)
+}
+
+func TestTelemetryBinaryVersionReadsSharedRuntimePluginMetadata(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"version":"1.2.3"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldExecutable := telemetryExecutable
+	telemetryExecutable = func() (string, error) { return filepath.Join(dir, "approve-bash"), nil }
+	t.Cleanup(func() { telemetryExecutable = oldExecutable })
+
+	assert.Equal(t, "1.2.3", telemetryBinaryVersion())
+}
+
+func TestTelemetryBinaryVersionReadsPluginCheckoutMetadata(t *testing.T) {
+	root := t.TempDir()
+	hookDir := filepath.Join(root, "hooks", "bash-approve")
+	metadataDir := filepath.Join(root, ".claude-plugin")
+	if err := os.MkdirAll(hookDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(metadataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(metadataDir, "plugin.json"), []byte(`{"version":"1.2.3"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldExecutable := telemetryExecutable
+	telemetryExecutable = func() (string, error) { return filepath.Join(hookDir, "approve-bash"), nil }
+	t.Cleanup(func() { telemetryExecutable = oldExecutable })
+
+	assert.Equal(t, "1.2.3", telemetryBinaryVersion())
+}
+
+func TestTelemetryBinaryVersionFallsBackToVersionInfo(t *testing.T) {
+	oldExecutable := telemetryExecutable
+	oldVersionInfo := telemetryVersionInfo
+	telemetryExecutable = func() (string, error) { return filepath.Join(t.TempDir(), "approve-bash"), nil }
+	telemetryVersionInfo = func() string { return "rev-0123456" }
+	t.Cleanup(func() {
+		telemetryExecutable = oldExecutable
+		telemetryVersionInfo = oldVersionInfo
+	})
+
+	assert.Equal(t, "rev-0123456", telemetryBinaryVersion())
 }
 
 func TestSQLiteSidecarsIncludesPresentFiles(t *testing.T) {
