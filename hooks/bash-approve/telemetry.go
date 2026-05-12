@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/earthboundkid/versioninfo/v2"
 	_ "modernc.org/sqlite"
 )
 
@@ -46,12 +48,17 @@ func sqliteFilesFor(base string) []string {
 }
 
 var (
-	telemetryHomeDir    = os.UserHomeDir
-	telemetryExecutable = os.Executable
-	copyFile            = copyFileStdlib
-	renameFile          = os.Rename
-	deleteLegacyFiles   = deleteLegacyTelemetryFiles
+	telemetryHomeDir     = os.UserHomeDir
+	telemetryExecutable  = os.Executable
+	copyFile             = copyFileStdlib
+	renameFile           = os.Rename
+	deleteLegacyFiles    = deleteLegacyTelemetryFiles
+	telemetryVersionInfo = versioninfo.Short
 )
+
+type pluginMetadata struct {
+	Version string `json:"version"`
+}
 
 func copyFileStdlib(src, dst string) (err error) {
 	info, err := os.Stat(src)
@@ -217,6 +224,7 @@ func resetTelemetryTestHooks() {
 	copyFile = copyFileStdlib
 	renameFile = os.Rename
 	deleteLegacyFiles = deleteLegacyTelemetryFiles
+	telemetryVersionInfo = versioninfo.Short
 }
 
 func telemetryArtifactPaths(base string) []string {
@@ -232,6 +240,7 @@ func initTelemetrySchema(db *sql.DB) bool {
 		id       INTEGER PRIMARY KEY,
 		ts       TEXT DEFAULT (datetime('now')),
 		agent    TEXT DEFAULT 'claude',
+		binary_version TEXT DEFAULT 'unknown',
 		payload  TEXT,
 		command  TEXT,
 		decision TEXT,
@@ -243,8 +252,60 @@ func initTelemetrySchema(db *sql.DB) bool {
 	if !ensureTelemetryColumn(db, "agent", "TEXT DEFAULT 'claude'") {
 		return false
 	}
+	if !ensureTelemetryColumn(db, "binary_version", "TEXT DEFAULT 'unknown'") {
+		return false
+	}
 	_, err = db.Exec(`UPDATE decisions SET agent = 'claude' WHERE agent IS NULL OR agent = ''`)
+	if err != nil {
+		return false
+	}
+	_, err = db.Exec(`UPDATE decisions SET binary_version = 'unknown' WHERE binary_version IS NULL OR binary_version = ''`)
 	return err == nil
+}
+
+func telemetryBinaryVersion() string {
+	if version := telemetryPluginVersion(); version != "" {
+		return version
+	}
+	if version := strings.TrimSpace(telemetryVersionInfo()); version != "" {
+		return version
+	}
+	return "unknown"
+}
+
+func telemetryPluginVersion() string {
+	exe, err := telemetryExecutable()
+	if err != nil || exe == "" {
+		return ""
+	}
+
+	for _, path := range telemetryPluginMetadataPaths(exe) {
+		version := telemetryPluginVersionFromPath(path)
+		if version != "" {
+			return version
+		}
+	}
+	return ""
+}
+
+func telemetryPluginMetadataPaths(exe string) []string {
+	dir := filepath.Dir(exe)
+	return []string{
+		filepath.Join(dir, "plugin.json"),
+		filepath.Clean(filepath.Join(dir, "..", "..", ".claude-plugin", "plugin.json")),
+	}
+}
+
+func telemetryPluginVersionFromPath(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var metadata pluginMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(metadata.Version)
 }
 
 func ensureTelemetryColumn(db *sql.DB, name, definition string) bool {
@@ -395,6 +456,6 @@ func logDecision(db *sql.DB, agent, payload, command, decision, reason string) {
 	if db == nil {
 		return
 	}
-	_, _ = db.Exec(`INSERT INTO decisions (agent, payload, command, decision, reason) VALUES (?, ?, ?, ?, ?)`,
-		agent, payload, command, decision, reason)
+	_, _ = db.Exec(`INSERT INTO decisions (agent, binary_version, payload, command, decision, reason) VALUES (?, ?, ?, ?, ?, ?)`,
+		agent, telemetryBinaryVersion(), payload, command, decision, reason)
 }

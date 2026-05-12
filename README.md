@@ -150,6 +150,7 @@ runtime_root="${XDG_DATA_HOME:-$HOME/.local/share}/claude-bash-approve"
 mkdir -p "$runtime_root"
 cp hooks/bash-approve/*.go "$runtime_root"/
 cp hooks/bash-approve/go.mod hooks/bash-approve/go.sum "$runtime_root"/
+cp .claude-plugin/plugin.json "$runtime_root"/plugin.json
 cp hooks/bash-approve/categories.yaml hooks/bash-approve/run-hook.sh "$runtime_root"/
 chmod +x "$runtime_root/run-hook.sh"
 ```
@@ -228,8 +229,10 @@ if [ -z "$state_home" ] || [ "${state_home#/}" = "$state_home" ]; then
   state_home="$HOME/.local/state"
 fi
 sqlite3 "$state_home/claude-bash-approve/telemetry.db" \
-  "SELECT ts, decision, command, reason FROM decisions ORDER BY ts DESC LIMIT 20"
+  "SELECT ts, agent, binary_version, decision, command, reason FROM decisions ORDER BY ts DESC LIMIT 20"
 ```
+
+The `binary_version` column records the `claude-bash-approve` build used for each decision. Installed runtimes read it from the copied plugin metadata; source-tree runs fall back to Go build information.
 
 Telemetry is best-effort — if the database can't be opened or written to, the hook continues normally.
 

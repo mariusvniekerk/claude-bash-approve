@@ -3,6 +3,7 @@ module bash-approve
 go 1.25.0
 
 require (
+	github.com/earthboundkid/versioninfo/v2 v2.24.1
 	github.com/stretchr/testify v1.11.1
 	go.yaml.in/yaml/v4 v4.0.0-rc.4
 	modernc.org/sqlite v1.46.1

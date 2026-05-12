@@ -88,6 +88,9 @@ class ClaudeInstallTest(InstallCLITestCase):
         settings_path = self.home / ".claude" / "settings.json"
         self.assertTrue((self.runtime_root / "approve-bash").is_file())
         self.assertTrue((self.runtime_root / "run-hook.sh").is_file())
+        runtime_metadata = json.loads((self.runtime_root / "plugin.json").read_text())
+        source_metadata = json.loads((install.repo_root() / ".claude-plugin" / "plugin.json").read_text())
+        self.assertEqual(runtime_metadata["version"], source_metadata["version"])
         self.assertFalse((self.home / ".claude" / "hooks" / "bash-approve").exists())
 
         settings = json.loads(settings_path.read_text())
