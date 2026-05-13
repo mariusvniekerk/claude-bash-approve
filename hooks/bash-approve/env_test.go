@@ -16,6 +16,8 @@ func TestValidateEnvVarNames(t *testing.T) {
 	}{
 		{"allowlist single", []string{"RUST_BACKTRACE"}, true, ""},
 		{"allowlist multi", []string{"RUST_BACKTRACE", "CARGO_HOME"}, true, ""},
+		{"allowlist CGO_ENABLED", []string{"CGO_ENABLED"}, true, ""},
+		{"allowlist CGO_CFLAGS", []string{"CGO_CFLAGS"}, true, ""},
 		{"multi with PYTHONPATH asks", []string{"RUST_BACKTRACE", "PYTHONPATH"}, false, decisionAsk},
 		{"hard-deny LD_PRELOAD", []string{"LD_PRELOAD"}, false, decisionDeny},
 		{"hard-deny BASH_ENV", []string{"BASH_ENV"}, false, decisionDeny},
