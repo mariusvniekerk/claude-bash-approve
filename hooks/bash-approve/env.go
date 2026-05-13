@@ -92,7 +92,7 @@ var envAllowExact = map[string]bool{
 // envAllowPrefixes is the prefix-match allowlist. Order does not matter
 // because hard-deny / ask sets are checked first.
 var envAllowPrefixes = []string{
-	"RUST_", "CARGO_", "PYTHON", "GO", "NODE_", "NPM_", "npm_",
+	"RUST_", "CARGO_", "PYTHON", "GO", "CGO_", "NODE_", "NPM_", "npm_",
 	"RUBY_", "RAILS_", "BUNDLE_", "JAVA_", "JVM_", "MAVEN_",
 	"GRADLE_", "GEM_", "RAKE_", "PIP_", "PYTEST_",
 	"MAKE_",
