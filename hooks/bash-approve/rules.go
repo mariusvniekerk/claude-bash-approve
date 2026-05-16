@@ -124,6 +124,8 @@ func commandPatterns() []pattern {
 			WithDenyReason("BLOCKED: git clean -f is banned. Remove specific files only.")),
 		NewPattern(`^git\s+(-C\s+\S+\s+)?push\b.*\s--no-verify\b`, tags("git push --no-verify", "git destructive", "git"), WithDecision("deny"),
 			WithDenyReason("BLOCKED: git push --no-verify is banned. Do not bypass pre-push hooks.")),
+		NewPattern(`^git\s+(-C\s+\S+\s+)?config\b.*(^|\s)core\.worktree(\s|$)`, tags("git config core.worktree", "git destructive", "git"), WithDecision("deny"),
+			WithDenyReason("BLOCKED: git config core.worktree is forbidden. It can make Git resolve the wrong working tree.")),
 		NewPattern(`^git\s+(-C\s+\S+\s+)?(add|checkout|cherry-pick|commit|merge|pull|rebase|switch|remote|config|rerere|worktree)\b`, tags("git write op", "git")),
 		NewPattern(`^git\s+(-C\s+\S+\s+)?tag\b`, tags("git tag", "git"), WithDecision("ask")),
 		NewPattern(`^git\s+(-C\s+\S+\s+)?push\b`, tags("git push", "git"), WithDecision("")),
