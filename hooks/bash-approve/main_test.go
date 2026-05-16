@@ -1321,6 +1321,42 @@ func TestNoOpinionDecision(t *testing.T) {
 		assert.Equal(t, "deny", r.decision)
 	})
 
+	t.Run("git config core.worktree denied", func(t *testing.T) {
+		r := evaluateAll("git config core.worktree /tmp/wrong")
+		require.NotNil(t, r)
+		assert.Equal(t, "git config core.worktree", r.reason)
+		assert.Equal(t, "deny", r.decision)
+		assert.Contains(t, r.denyReason, "core.worktree is forbidden")
+	})
+
+	t.Run("git config core.worktree denied with scope flag", func(t *testing.T) {
+		r := evaluateAll("git config --global --add core.worktree /tmp/wrong")
+		require.NotNil(t, r)
+		assert.Equal(t, "git config core.worktree", r.reason)
+		assert.Equal(t, "deny", r.decision)
+	})
+
+	t.Run("git config core.worktree denied with git -C", func(t *testing.T) {
+		r := evaluateAll("git -C /repo config --local core.worktree /tmp/wrong")
+		require.NotNil(t, r)
+		assert.Equal(t, "git config core.worktree", r.reason)
+		assert.Equal(t, "deny", r.decision)
+	})
+
+	t.Run("git config core.worktree read is still denied", func(t *testing.T) {
+		r := evaluateAll("git config --get core.worktree")
+		require.NotNil(t, r)
+		assert.Equal(t, "git config core.worktree", r.reason)
+		assert.Equal(t, "deny", r.decision)
+	})
+
+	t.Run("chain with git config core.worktree denied", func(t *testing.T) {
+		r := evaluateAll("git status && git config core.worktree /tmp/wrong")
+		require.NotNil(t, r)
+		assert.Equal(t, "deny", r.decision)
+		assert.Contains(t, r.denyReason, "core.worktree is forbidden")
+	})
+
 	// --- shell destructive ops (deny) ---
 	t.Run("rm -rf denied", func(t *testing.T) {
 		r := evaluateAll("rm -rf /tmp/stuff")
