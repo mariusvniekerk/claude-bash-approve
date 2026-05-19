@@ -132,6 +132,54 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 		assert.Equal(t, decisionAllow, r.decision)
 	})
 
+	t.Run("PREK_ALLOW_NO_CONFIG allows git commit", func(t *testing.T) {
+		r := evaluateAll("PREK_ALLOW_NO_CONFIG=1 git commit --amend --no-edit")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "env vars+git write op", r.reason)
+	})
+
+	t.Run("PREK_GIT_REF allows git commit", func(t *testing.T) {
+		r := evaluateAll("PREK_GIT_REF=HEAD git commit --amend --no-edit")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "env vars+git write op", r.reason)
+	})
+
+	t.Run("GIT_EDITOR true allows git-spice rebase continue", func(t *testing.T) {
+		r := evaluateAll("GIT_EDITOR=true git-spice rebase continue")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "env vars+git-spice", r.reason)
+	})
+
+	t.Run("GIT_EDITOR true allows git-spice no-prompt rebase continue", func(t *testing.T) {
+		r := evaluateAll("GIT_EDITOR=true git-spice --no-prompt rebase continue")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "env vars+git-spice", r.reason)
+	})
+
+	t.Run("GIT_EDITOR true allows git rebase continue", func(t *testing.T) {
+		r := evaluateAll("GIT_EDITOR=true git rebase --continue")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "env vars+git write op", r.reason)
+	})
+
+	t.Run("GIT_EDITOR true allows git rebase branch", func(t *testing.T) {
+		r := evaluateAll("GIT_EDITOR=true git rebase main")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "env vars+git write op", r.reason)
+	})
+
+	t.Run("GIT_EDITOR arbitrary command still asks", func(t *testing.T) {
+		r := evaluateAll("GIT_EDITOR='sh -c evil' git rebase --continue")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
 	t.Run("PYTHONPATH asks (module hijack vector)", func(t *testing.T) {
 		r := evaluateAll("PYTHONPATH=. python script.py")
 		require.NotNil(t, r)
