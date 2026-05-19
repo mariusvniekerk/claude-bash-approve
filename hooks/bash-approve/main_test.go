@@ -171,13 +171,11 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"nix build attr", "nix build '.#hello'", "nix"},
 		{"nix build flags", "nix build '.#nixosConfigurations.falcon.config.home-manager.users.cloud.home.activationPackage' --no-link --print-out-paths", "nix"},
 		{"nix build piped", `nix build '.#x' --no-link --print-out-paths 2>&1 | tail -10`, "nix | read-only"},
-		{"nix run no args", "nix run 'nixpkgs#hello'", "nix"},
-		{"nix shell no command", "nix shell 'nixpkgs#go'", "nix"},
-		{"nix shell command read-only", "nix shell 'nixpkgs#go' --command go test ./...", "nix"},
-		{"nix shell -c read-only", "nix shell 'nixpkgs#ripgrep' -c rg pattern .", "nix"},
-		{"nix develop bare", "nix develop", "nix"},
-		{"nix develop attr", "nix develop '.#default'", "nix"},
-		{"nix develop --command read-only", "nix develop --command go test ./...", "nix"},
+		// `nix run`, `nix shell`, `nix develop` dispatch via handleNixRun /
+		// handleNixShell with cmd extraction; reasons include the inner cmd.
+		{"nix shell command go test", "nix shell 'nixpkgs#go' --command go test ./...", "nix shell+go"},
+		{"nix shell -c rg", "nix shell 'nixpkgs#ripgrep' -c rg pattern .", "nix shell+read-only"},
+		{"nix develop --command go test", "nix develop --command go test ./...", "nix develop+go"},
 		{"nix-shell bare", "nix-shell", "nix-shell"},
 		{"nix-shell -p", "nix-shell -p hello", "nix-shell"},
 		{"nix-shell --run read-only", "nix-shell -p ripgrep --run 'rg pattern path'", "nix-shell"},
@@ -672,6 +670,109 @@ func TestEvaluate_Wrappers(t *testing.T) {
 			r := evaluateAll(tt.cmd)
 			require.NotNilf(t, r, "expected approval for %q, got rejected", tt.cmd)
 			assert.Equal(t, tt.reason, r.reason)
+		})
+	}
+}
+
+func TestEvaluate_Nix(t *testing.T) {
+	approve := []struct {
+		name   string
+		cmd    string
+		reason string
+	}{
+		{"nix run with --", "nix run nixpkgs#git -- log", "nix run+git read op"},
+		{"nix run with -- multi arg", "nix run nixpkgs#git -- log --oneline", "nix run+git read op"},
+		{"nix run quoted pkg", "nix run 'nixpkgs#git' -- log", "nix run+git read op"},
+		{"nix run dot-path", "nix run nixpkgs#legacyPackages.x86_64-linux.git -- log", "nix run+git read op"},
+		{"nix run output selector", "nix run nixpkgs#git^bin -- log", "nix run+git read op"},
+		{"nix run local flake", "nix run .#git -- log", "nix run+git read op"},
+		{"nix shell --command", "nix shell nixpkgs#foo --command ls", "nix shell+read-only"},
+		{"nix shell -c", "nix shell nixpkgs#foo -c ls -la", "nix shell+read-only"},
+		{"nix shell multi pkg", "nix shell nixpkgs#foo nixpkgs#bar --command git log", "nix shell+git read op"},
+		{"nix shell no pkg", "nix shell --command ls", "nix shell+read-only"},
+		{"nix shell quoted pkg", "nix shell 'nixpkgs#foo' --command git status", "nix shell+git read op"},
+		{"nix shell wrapper-aware inner", "nix shell nixpkgs#cargo -c cargo test", "nix shell+cargo"},
+		{"nix run with env var", "RUST_LOG=info nix run nixpkgs#cargo -- build", "nix run+env vars+cargo"},
+		{"nix run in chain", "nix run nixpkgs#git -- log && echo done", "nix run+git read op | echo"},
+		{"nix shell in pipe", "nix shell nixpkgs#git -c git log | head -5", "nix shell+git read op | read-only"},
+		{"nix shell with safe cmdsubst pkg", "nix shell $(echo nixpkgs#git) -c git status", "nix shell+git read op"},
+	}
+	for _, tt := range approve {
+		t.Run("approve/"+tt.name, func(t *testing.T) {
+			r := evaluateAll(tt.cmd)
+			require.NotNilf(t, r, "expected approval for %q, got rejected", tt.cmd)
+			assert.Equal(t, decisionAllow, r.decision, "decision for %q", tt.cmd)
+			assert.Equal(t, tt.reason, r.reason)
+		})
+	}
+
+	// Forms handleNixRun / handleNixShell decline (extra flags, no `--`,
+	// no --command, --expr). These fall through to the
+	// `^nix\s+(run|shell|develop)\b` pattern + isNixRunShellSafe
+	// validator, which approves bare invocations and asks for risky
+	// forms (e.g. unknown --command). The reason is "nix" in both cases
+	// since the pattern's label wins.
+	fallback := []struct {
+		name     string
+		cmd      string
+		decision string
+	}{
+		// Bare `nix run` / `nix shell` / `nix develop` (no `--`, no
+		// --command) — the validator says safe enough.
+		{"nix run no pkg", "nix run", decisionAllow},
+		{"nix run pkg without #", "nix run nixpkgs", decisionAllow},
+		{"nix run flag before pkg", "nix run --no-write-lock-file nixpkgs#hello", decisionAllow},
+		{"nix run args without --", "nix run nixpkgs#hello extra", decisionAllow},
+		{"nix run unknown cmd bare", "nix run nixpkgs#hello", decisionAllow},
+		{"nix shell no command", "nix shell nixpkgs#foo", decisionAllow},
+		{"nix shell bare", "nix shell", decisionAllow},
+		// Inner cmd not on any allow pattern — validator asks.
+		{"nix shell unknown inner cmd", "nix shell nixpkgs#foo --command bash", decisionAsk},
+	}
+	for _, tt := range fallback {
+		t.Run("fallback/"+tt.name, func(t *testing.T) {
+			r := evaluateAll(tt.cmd)
+			require.NotNilf(t, r, "expected %s for %q, got rejected", tt.decision, tt.cmd)
+			assert.Equal(t, tt.decision, r.decision, "decision for %q", tt.cmd)
+		})
+	}
+
+	// Unknown command substitutions in any position cause
+	// substitutionPropagate to reject the whole call regardless of nix
+	// dispatch — same as any other call expression.
+	reject := []string{
+		"nix run nixpkgs#$(get-cmd)",
+		"nix shell nixpkgs#foo -c $(get-cmd)",
+	}
+	for _, cmd := range reject {
+		t.Run("reject/"+cmd, func(t *testing.T) {
+			r := evaluateAll(cmd)
+			if r != nil {
+				assert.Empty(t, r.decision, "expected no decision for %q, got %+v", cmd, r)
+			}
+		})
+	}
+
+	deny := []struct {
+		name        string
+		cmd         string
+		denyContain string
+	}{
+		{"nix run rm -rf", "nix run nixpkgs#rm -- -rf /", "rm -r is banned"},
+		{"nix run git stash", "nix run nixpkgs#git -- stash", "git stash is banned"},
+		{"nix shell rm -rf", "nix shell nixpkgs#rm --command rm -rf /tmp", "rm -r is banned"},
+		{"nix shell git stash", "nix shell nixpkgs#git -c git stash", "git stash is banned"},
+		// Dangerous command lives in a substitution — propagated through nix run.
+		{"nix run cmdsubst rm -rf", "nix run nixpkgs#hello -- $(rm -rf /)", "rm -r is banned"},
+		// LD_PRELOAD-style env var on the outer call denies regardless of inner cmd.
+		{"nix run LD_PRELOAD", "LD_PRELOAD=/x nix run nixpkgs#git -- log", "LD_PRELOAD"},
+	}
+	for _, tt := range deny {
+		t.Run("deny/"+tt.name, func(t *testing.T) {
+			r := evaluateAll(tt.cmd)
+			require.NotNil(t, r, "expected deny for %q, got nil", tt.cmd)
+			assert.Equal(t, decisionDeny, r.decision)
+			assert.Contains(t, r.denyReason, tt.denyContain)
 		})
 	}
 }
