@@ -164,6 +164,15 @@ func commandPatterns() []pattern {
 		NewPattern(`^mise\s+approve\b`, tags("mise")),
 
 		// nix / nh
+		//
+		// `nix run`, `nix shell`, and `nix develop` are first dispatched by
+		// handleNixRun / handleNixShell in evaluateCallExpr, which delegate
+		// to the inner command's pattern (so `nix run nixpkgs#git -- stash`
+		// denies, `nix shell pkg -c ls` approves as read-only, etc.). The
+		// `run|shell|develop` pattern below is the fallback when the
+		// dispatch can't reach a decision (unknown inner cmd, package whose
+		// installable name doesn't match its binary, --expr, extra nix
+		// flags): isNixRunShellSafe falls back to ask.
 		NewPattern(`^nix\s+(build|eval|log|path-info|why-depends)\b`, tags("nix")),
 		NewPattern(`^nix\s+(run|shell|develop)\b`, tags("nix"), WithValidator(isNixRunShellSafe)),
 		NewPattern(`^nix\s+flake\s+(show|metadata|info|update|lock|prefetch|archive)\b`, tags("nix flake read", "nix")),

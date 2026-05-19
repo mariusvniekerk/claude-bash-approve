@@ -682,6 +682,25 @@ func evaluateCallExpr(call *syntax.CallExpr, ctx evalContext, wrapperPats, comma
 		return matchAndBuild(resolved, call.Args[1:], call.Assigns, call.Args, ctx, wrapperPats, commandPats)
 	}
 
+	// `nix run <pkg> [-- args]` and `nix (shell|develop) <pkgs> (--command|-c) <cmd> [args]`
+	// evaluate the embedded command directly so the user gets the same
+	// auto-approve / deny decision they would for `<cmd> args`. Unsupported
+	// forms (extra nix flags, --expr, dynamic package name) fall through to
+	// the normal matching path, where the `nix-shell` pattern's validator
+	// or the outer ask path takes over.
+	if cmdName == "nix" && len(call.Args) >= 2 {
+		switch wordLiteral(call.Args[1]) {
+		case "run":
+			if r, ok := handleNixRun(call, ctx, wrapperPats, commandPats); ok {
+				return r
+			}
+		case "shell", "develop":
+			if r, ok := handleNixShell(call, ctx, wrapperPats, commandPats); ok {
+				return r
+			}
+		}
+	}
+
 	// Normal path: check all substitutions
 	if r, prop := substitutionPropagate(call, ctx, wrapperPats, commandPats); prop {
 		return r

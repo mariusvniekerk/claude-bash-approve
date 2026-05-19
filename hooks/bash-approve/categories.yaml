@@ -14,7 +14,7 @@
 #   git config core.worktree, go mod vendor, roborev tui
 #
 # Available coarse groups:
-#   wrapper, git, python, node, rust, make, shell, gh, go, kubectl, bq, acli, roborev, ruby,
+#   wrapper, git, python, node, rust, make, nix, shell, gh, go, kubectl, bq, acli, roborev, ruby,
 #   shellcheck, grpcurl, git-spice, kata, tmux
 #
 # Fine-grained names within each group:
@@ -27,6 +27,8 @@
 #   node:     npm, npm audit fix (ask), npx, vitest, bun, bunx
 #   rust:     cargo, maturin
 #   make:     make
+#   nix:      nix, nix flake read, nix-build, nix-shell, nix-store query, nh build
+#             (`nix run` and `nix shell` --command delegate to the inner command's tags)
 #   shell:    read-only, touch, shell builtin, process mgmt, echo, cd, venv activate, sleep, var assignment, lookup
 #   gh:       gh read op, gh pr create, gh write op, gh api, gh auth
 #   go:       go, go mod vendor (deny), go mod init (ask), golangci-lint, ginkgo, nilaway
