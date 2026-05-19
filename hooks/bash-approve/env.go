@@ -2,7 +2,43 @@ package main
 
 import (
 	"strings"
+
+	"mvdan.cc/sh/v3/syntax"
 )
+
+type envAssignment struct {
+	name        string
+	value       string
+	staticValue bool
+}
+
+func envAssignmentsFromSyntax(assigns []*syntax.Assign) []envAssignment {
+	out := make([]envAssignment, 0, len(assigns))
+	for _, assign := range assigns {
+		if assign.Name == nil {
+			continue
+		}
+		envAssign := envAssignment{name: assign.Name.Value}
+		if assign.Value != nil {
+			if value, ok := wordDecodedLiteral(assign.Value); ok {
+				envAssign.value = value
+				envAssign.staticValue = true
+			}
+		}
+		out = append(out, envAssign)
+	}
+	return out
+}
+
+func assignNames(assigns []*syntax.Assign) []string {
+	names := make([]string, 0, len(assigns))
+	for _, assign := range assigns {
+		if assign.Name != nil {
+			names = append(names, assign.Name.Value)
+		}
+	}
+	return names
+}
 
 // envHardDeny lists env-var names that should never auto-execute. These are
 // known library-injection / shell-init / process-impersonation vectors.
@@ -96,6 +132,7 @@ var envAllowPrefixes = []string{
 	"RUBY_", "RAILS_", "BUNDLE_", "JAVA_", "JVM_", "MAVEN_",
 	"GRADLE_", "GEM_", "RAKE_", "PIP_", "PYTEST_",
 	"MAKE_",
+	"PREK_",
 	"DOCKER_", "KUBE_", "K8S_", "HELM_", "COMPOSE_",
 	"TF_", "TERRAFORM_", "PULUMI_", "ANSIBLE_",
 	"NIX_", "MISE_", "ASDF_", "DIRENV_",
@@ -103,22 +140,38 @@ var envAllowPrefixes = []string{
 	"LOG_", "TEST_",
 }
 
+var envAllowExactValues = map[string]map[string]bool{
+	"GIT_EDITOR": {"true": true},
+}
+
 // validateEnvVarNames applies hard-deny → ask → allowlist → default-ask.
 // Hard-deny is checked across ALL names first so it can't be bypassed by
 // putting an unknown var earlier in the list.
 // Returns nil only if every name matches the allowlist.
 func validateEnvVarNames(names []string, _ evalContext) *result {
-	// Pass 1: hard-deny is unconditional regardless of where in the list it appears.
+	assignments := make([]envAssignment, 0, len(names))
 	for _, name := range names {
-		if envHardDeny[name] {
+		assignments = append(assignments, envAssignment{name: name})
+	}
+	return validateEnvAssignments(assignments)
+}
+
+func validateEnvAssignments(assignments []envAssignment) *result {
+	// Pass 1: hard-deny is unconditional regardless of where in the list it appears.
+	for _, assignment := range assignments {
+		if envHardDeny[assignment.name] {
 			return &result{
 				decision:   decisionDeny,
-				denyReason: "BLOCKED: env var " + name + " can subvert command execution. Use a safer alternative.",
+				denyReason: "BLOCKED: env var " + assignment.name + " can subvert command execution. Use a safer alternative.",
 			}
 		}
 	}
 	// Pass 2: per-name ask/allow check.
-	for _, name := range names {
+	for _, assignment := range assignments {
+		name := assignment.name
+		if allowedValues, ok := envAllowExactValues[name]; ok && assignment.staticValue && allowedValues[assignment.value] {
+			continue
+		}
 		if envAskExact[name] {
 			return &result{decision: decisionAsk}
 		}
@@ -176,13 +229,17 @@ func validateStandaloneAssignNames(names []string) *result {
 // tokens), so a simple Fields split is safe.
 func isSafeEnvVarsWrapper(matchedPrefix string, ctx evalContext) *result {
 	tokens := strings.Fields(matchedPrefix)
-	names := make([]string, 0, len(tokens))
+	assignments := make([]envAssignment, 0, len(tokens))
 	for _, tok := range tokens {
 		eq := strings.IndexByte(tok, '=')
 		if eq <= 0 {
 			continue
 		}
-		names = append(names, tok[:eq])
+		assignments = append(assignments, envAssignment{
+			name:        tok[:eq],
+			value:       tok[eq+1:],
+			staticValue: true,
+		})
 	}
-	return validateEnvVarNames(names, ctx)
+	return validateEnvAssignments(assignments)
 }

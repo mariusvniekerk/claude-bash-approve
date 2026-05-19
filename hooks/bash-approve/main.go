@@ -557,14 +557,8 @@ func evaluateDeclClause(c *syntax.DeclClause, ctx evalContext, wrapperPats, comm
 	if r, prop := substitutionPropagate(c, ctx, wrapperPats, commandPats); prop {
 		return r
 	}
-	names := make([]string, 0, len(c.Args))
-	for _, a := range c.Args {
-		if a.Name != nil {
-			names = append(names, a.Name.Value)
-		}
-	}
 	out := approved("shell vars")
-	if r := validateEnvVarNames(names, ctx); r != nil {
+	if r := validateEnvAssignments(envAssignmentsFromSyntax(c.Args)); r != nil {
 		out.decision = r.decision
 		out.denyReason = r.denyReason
 	}
@@ -633,14 +627,8 @@ func evaluateCallExpr(call *syntax.CallExpr, ctx evalContext, wrapperPats, comma
 		if r, prop := substitutionPropagate(call, ctx, wrapperPats, commandPats); prop {
 			return r
 		}
-		names := make([]string, 0, len(call.Assigns))
-		for _, a := range call.Assigns {
-			if a.Name != nil {
-				names = append(names, a.Name.Value)
-			}
-		}
 		out := approved("var assignment")
-		if r := validateStandaloneAssignNames(names); r != nil {
+		if r := validateStandaloneAssignNames(assignNames(call.Assigns)); r != nil {
 			out.decision = r.decision
 			out.denyReason = r.denyReason
 		}
@@ -744,13 +732,7 @@ func matchAndBuild(cmdText string, extraArgs []*syntax.Word, assigns []*syntax.A
 		}
 	}
 	if len(assigns) > 0 {
-		names := make([]string, 0, len(assigns))
-		for _, a := range assigns {
-			if a.Name != nil {
-				names = append(names, a.Name.Value)
-			}
-		}
-		if r := validateEnvVarNames(names, ctx); r != nil {
+		if r := validateEnvAssignments(envAssignmentsFromSyntax(assigns)); r != nil {
 			overrides = append(overrides, r)
 		}
 	}
