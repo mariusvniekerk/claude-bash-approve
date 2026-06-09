@@ -376,6 +376,7 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"go build", "go build ./...", "go"},
 		{"go test", "go test -v ./...", "go"},
 		{"gofmt", `gofmt -w "internal/github/normalize.go"`, "gofmt"},
+		{"gopls", "gopls version", "gopls"},
 		{"go vet", "go vet ./...", "go"},
 		{"go list", "go list -m all", "go"},
 		{"go get", "go get golang.org/x/tools", "go"},

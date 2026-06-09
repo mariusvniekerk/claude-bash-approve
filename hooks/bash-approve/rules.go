@@ -243,6 +243,7 @@ func commandPatterns() []pattern {
 		NewPattern(`^go\s+mod\s+init\b`, tags("go mod init", "go"), WithDecision("")),
 		NewPattern(`^go\s+(build|test|vet|list|get|mod\s+(tidy|download)|run|fmt|generate|install|clean|doc|env|version|tool)\b`, tags("go")),
 		NewPattern(`^gofmt\b`, tags("gofmt", "go")),
+		NewPattern(`^gopls\b`, tags("gopls", "go")),
 		NewPattern(`^golangci-lint\b`, tags("golangci-lint", "go")),
 		NewPattern(`^ginkgo\b`, tags("ginkgo", "go")),
 		NewPattern(`^nilaway\b`, tags("nilaway", "go")),
