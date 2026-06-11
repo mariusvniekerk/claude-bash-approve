@@ -80,7 +80,8 @@ type result struct {
 }
 
 type evalContext struct {
-	cwd string
+	cwd            string
+	safeCDPrefixes []string
 	// wrapperPats and commandPats carry the config-filtered pattern
 	// lists through nested evaluation (find -exec, xargs, awk system).
 	// evaluate() seeds them on every call so they are always populated;
@@ -98,8 +99,9 @@ var shPrinter = syntax.NewPrinter()
 
 // Config represents the categories.yaml file.
 type Config struct {
-	Enabled  []string `yaml:"enabled"`
-	Disabled []string `yaml:"disabled"`
+	Enabled        []string `yaml:"enabled"`
+	Disabled       []string `yaml:"disabled"`
+	SafeCDPrefixes []string `yaml:"safe_cd_prefixes"`
 }
 
 // loadConfig reads categories.yaml from the same directory as the executable.
@@ -1324,6 +1326,7 @@ func resolveWhichOrCommandV(part syntax.WordPart) string {
 // Evaluate checks whether a command should be approved given a config.
 // Returns nil if rejected, or a *result with the approval reason.
 func Evaluate(cmd string, cfg Config, ctx evalContext) *result {
+	ctx.safeCDPrefixes = cfg.SafeCDPrefixes
 	wrappers, commands := buildActivePatterns(cfg)
 	return evaluate(cmd, ctx, wrappers, commands)
 }

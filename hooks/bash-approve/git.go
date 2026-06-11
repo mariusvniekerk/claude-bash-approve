@@ -83,6 +83,10 @@ func isCurrentRepoWorktreeCD(args []*syntax.Word, ctx evalContext) bool {
 		return false
 	}
 
+	if pathWithinAnySafeCDPrefix(resolvedTarget, ctx.safeCDPrefixes) {
+		return true
+	}
+
 	if pathIsExistingDirWithinRepo(ctx.cwd, resolvedTarget) {
 		return true
 	}
@@ -108,6 +112,37 @@ func isCurrentRepoWorktreeCD(args []*syntax.Word, ctx evalContext) bool {
 	return currentCommonDir == targetCommonDir
 }
 
+func pathWithinAnySafeCDPrefix(target string, prefixes []string) bool {
+	if target == "" {
+		return false
+	}
+
+	target, err := filepath.Abs(target)
+	if err != nil {
+		return false
+	}
+
+	for _, prefix := range prefixes {
+		prefix = strings.TrimSpace(prefix)
+		if prefix == "" || !filepath.IsAbs(prefix) {
+			continue
+		}
+
+		prefix, err := filepath.Abs(prefix)
+		if err != nil {
+			continue
+		}
+		if resolvedPrefix, err := filepath.EvalSymlinks(prefix); err == nil {
+			prefix = resolvedPrefix
+		}
+
+		if pathWithinDir(prefix, target) {
+			return true
+		}
+	}
+	return false
+}
+
 func pathIsExistingDirWithinRepo(cwd, target string) bool {
 	repoRoot := repoRootForCwd(cwd)
 	if repoRoot == "" || target == "" {
@@ -119,7 +154,11 @@ func pathIsExistingDirWithinRepo(cwd, target string) bool {
 		return false
 	}
 
-	rel, err := filepath.Rel(repoRoot, target)
+	return pathWithinDir(repoRoot, target)
+}
+
+func pathWithinDir(root, target string) bool {
+	rel, err := filepath.Rel(root, target)
 	if err != nil {
 		return false
 	}

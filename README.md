@@ -180,6 +180,20 @@ enabled:
 
 `disabled` always overrides `enabled` — use it to carve out exceptions.
 
+### Safe `cd` Prefixes
+
+By default, `cd` is approved only for the current Git repo, its subdirectories, or linked worktrees from the same repo. To approve additional directory trees, add absolute paths under `safe_cd_prefixes`:
+
+```yaml
+enabled:
+  - all
+safe_cd_prefixes:
+  - /tmp/project-scratch
+  - /Users/me/worktrees
+```
+
+Relative prefixes are ignored. The `cd` target and any existing configured prefix are resolved through symlinks before comparison, so a symlink under an allowed prefix that points outside the prefix is not approved.
+
 ### Default decisions by command
 
 Most matched commands are auto-approved. Some have different defaults:

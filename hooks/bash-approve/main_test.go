@@ -21,6 +21,10 @@ func evaluateAllInDir(cmd, cwd string) *result {
 	return evaluate(cmd, evalContext{cwd: cwd}, wrapperPatterns(), commandPatterns())
 }
 
+func evaluateWithConfigInDir(cmd string, cfg Config, cwd string) *result {
+	return Evaluate(cmd, cfg, evalContext{cwd: cwd})
+}
+
 func TestEvaluate_Approved(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -1822,6 +1826,40 @@ func TestCDApproval_CurrentRepoWorktreesOnly(t *testing.T) {
 	})
 }
 
+func TestCDApproval_ConfiguredSafePrefixes(t *testing.T) {
+	repo := initGitRepo(t)
+	safeRoot := t.TempDir()
+	allowedDir := filepath.Join(safeRoot, "scratch", "project")
+	require.NoError(t, os.MkdirAll(allowedDir, 0o755))
+
+	cfg := Config{Enabled: []string{"all"}, SafeCDPrefixes: []string{safeRoot}}
+
+	t.Run("configured safe prefix is approved", func(t *testing.T) {
+		r := evaluateWithConfigInDir("cd "+allowedDir, cfg, repo)
+		require.NotNil(t, r)
+		assert.Equal(t, "cd", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("symlink escape from configured safe prefix is no-opinion", func(t *testing.T) {
+		outsideDir := t.TempDir()
+		linkPath := filepath.Join(safeRoot, "escape")
+		require.NoError(t, os.Symlink(outsideDir, linkPath))
+
+		r := evaluateWithConfigInDir("cd "+linkPath, cfg, repo)
+		require.NotNil(t, r)
+		assert.Equal(t, "cd", r.reason)
+		assert.Empty(t, r.decision)
+	})
+
+	t.Run("relative safe prefix is ignored", func(t *testing.T) {
+		r := evaluateWithConfigInDir("cd "+allowedDir, Config{Enabled: []string{"all"}, SafeCDPrefixes: []string{"scratch"}}, repo)
+		require.NotNil(t, r)
+		assert.Equal(t, "cd", r.reason)
+		assert.Empty(t, r.decision)
+	})
+}
+
 func TestEvaluateToolUse_ReadAndGrepRepoScoped(t *testing.T) {
 	repo := initGitRepo(t)
 	repoFile := filepath.Join(repo, "inside.txt")
@@ -1986,6 +2024,13 @@ func TestLoadConfigFromPath(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{"git", "python"}, cfg.Enabled)
 		assert.Equal(t, []string{"git write op"}, cfg.Disabled)
+	})
+
+	t.Run("safe cd prefixes parsed", func(t *testing.T) {
+		path := writeTestConfig(t, "enabled:\n  - all\nsafe_cd_prefixes:\n  - /tmp/scratch\n  - /var/tmp/worktrees\n")
+		cfg, err := loadConfigFromPath(path)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"/tmp/scratch", "/var/tmp/worktrees"}, cfg.SafeCDPrefixes)
 	})
 
 	t.Run("only enabled specified", func(t *testing.T) {
