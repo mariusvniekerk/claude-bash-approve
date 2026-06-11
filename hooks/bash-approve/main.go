@@ -19,6 +19,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1126,9 +1127,7 @@ func recordStandaloneAssignments(stmt *syntax.Stmt, ctx *evalContext) {
 	if ctx.shellVars == nil {
 		ctx.shellVars = make(map[string]string, len(updates))
 	}
-	for name, value := range updates {
-		ctx.shellVars[name] = value
-	}
+	maps.Copy(ctx.shellVars, updates)
 }
 
 // errUnhandledCmdSubst signals that a command substitution can't be evaluated
@@ -1344,16 +1343,13 @@ func hexDigit(b byte) int {
 	return -1
 }
 
-// dblQuotedDecodable reports whether all parts inside a *syntax.DblQuoted
+// dblQuotedDecodableWithContext reports whether all parts inside a *syntax.DblQuoted
 // node can be resolved statically: Lit (text with backslash escapes) and
 // CmdSubst (handled via literalCfg's CmdSubst handler). ParamExp and
 // ArithmExp would be evaluated against an empty environment by
 // expand.Literal, silently producing matches based on default values
 // instead of the real runtime — so we fall back to the printed source.
-func dblQuotedDecodable(d *syntax.DblQuoted) bool {
-	return dblQuotedDecodableWithContext(d, evalContext{})
-}
-
+// ParamExps known in ctx.shellVars are resolvable.
 func dblQuotedDecodableWithContext(d *syntax.DblQuoted, ctx evalContext) bool {
 	for _, part := range d.Parts {
 		switch p := part.(type) {
