@@ -95,6 +95,7 @@ func TestXargsUnsafe(t *testing.T) {
 		// decision.
 		{"xargs touch (write command)", "xargs touch"},
 		{"xargs mkdir (write command)", "xargs mkdir"},
+		{"xargs git add direct", "xargs git add --"},
 		{"xargs less (log-file option)", "xargs less"},
 		{"xargs more (option-driven)", "xargs more"},
 		{"xargs yq (in-place option)", "xargs yq"},
@@ -105,6 +106,53 @@ func TestXargsUnsafe(t *testing.T) {
 			r := evaluateAll(tt.cmd)
 			require.NotNilf(t, r, "expected ask for %q, got rejected (nil)", tt.cmd)
 			assert.Equal(t, "ask", r.decision, "unsafe xargs should get ask decision for %q", tt.cmd)
+		})
+	}
+}
+
+func TestXargsReadOnlyPipelineCanAppendToAllowedCommands(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+	}{
+		{
+			name: "telemetry conflict resolution chain",
+			cmd:  `git diff --name-only --diff-filter=U | grep -v -e '^frontend/' -e '^README\.md' | tr '\n' '\0' | xargs -0 git checkout --theirs -- && git diff --name-only --diff-filter=U | grep -v -e '^frontend/' -e '^README\.md' | tr '\n' '\0' | xargs -0 git add -- && git diff --name-only --diff-filter=U`,
+		},
+		{
+			name: "git read pipeline to git add",
+			cmd:  `git diff --name-only --diff-filter=U | grep -v -e '^frontend/' | xargs git add --`,
+		},
+		{
+			name: "git read pipeline to touch",
+			cmd:  `git ls-files | xargs touch`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := evaluateAll(tt.cmd)
+			require.NotNil(t, r)
+			assert.Equal(t, decisionAllow, r.decision)
+		})
+	}
+}
+
+func TestXargsReadOnlyPipelineBoundaries(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+	}{
+		{"synthetic input is not trusted", `printf 'README.md\0' | xargs -0 git add --`},
+		{"placeholder replacement still asks", `git diff --name-only | xargs -I {} git add {}`},
+		{"dangerous command still asks", `git diff --name-only | xargs git stash`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := evaluateAll(tt.cmd)
+			require.NotNil(t, r)
+			assert.Equal(t, decisionAsk, r.decision)
 		})
 	}
 }
