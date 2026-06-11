@@ -7,6 +7,7 @@ import (
 )
 
 var readOnlyStreamReasons = map[string]bool{
+	"awk":                   true,
 	"bq":                    true,
 	"gcloud compute read":   true,
 	"gcloud config":         true,
