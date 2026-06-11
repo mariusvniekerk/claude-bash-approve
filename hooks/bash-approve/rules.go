@@ -100,7 +100,7 @@ func wrapperPatterns() []pattern {
 		NewPattern(`^bundle\s+exec\s+`, tags("bundle exec", "wrapper")),
 		NewPattern(`^rtk\s+proxy\s+`, tags("rtk proxy", "wrapper")),
 		NewPattern(`^command\s+`, tags("command", "wrapper")),
-		NewPattern(`^(\.\./)*node_modules/\.bin/`, tags("node_modules/.bin", "wrapper")),
+		NewPattern(`^(\./|\.\./)*node_modules/\.bin/`, tags("node_modules/.bin", "wrapper")),
 		NewPattern(`^/[^\s]+/`, tags("absolute path", "wrapper"), WithWrapperValidator(isSafeAbsolutePath)),
 	}
 }
@@ -150,6 +150,9 @@ func commandPatterns() []pattern {
 		NewPattern(`^npm\s+(install|run|test|build|ci|audit)\b`, tags("npm", "node")),
 		NewPattern(`^npx\b`, tags("npx", "node")),
 		NewPattern(`^node\s+-[ep]\b`, tags("node -e", "node")),
+		NewPattern(`^playwright\s+test\b`, tags("playwright", "node")),
+		NewPattern(`^vp\s+(test|build|check|run)\b`, tags("vp", "node")),
+		NewPattern(`^vp\s+exec\s+playwright\s+test\b`, tags("vp", "node")),
 		NewPattern(`^bun\s+(install|run|test|build|add|remove|-[ep]|--eval)\b`, tags("bun", "node")),
 		NewPattern(`^bunx\b`, tags("bunx", "node")),
 		NewPattern(`^vitest\b`, tags("vitest", "node")),
