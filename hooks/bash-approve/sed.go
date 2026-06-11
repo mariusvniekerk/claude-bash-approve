@@ -29,11 +29,7 @@ func isSedSafe(args []*syntax.Word, ctx evalContext) bool {
 	if len(args) < 2 {
 		return true
 	}
-	parsed := parseArgs(args[1:], sedSpec)
-	if !parsed.allLiteral {
-		// Dynamic flags/scripts can't be verified — be conservative.
-		return false
-	}
+	parsed := parseArgsWithContext(args[1:], sedSpec, ctx)
 
 	// `-i`, `-i.bak`, `-ni`, etc. all leave a literal `i` key in flags
 	// after short-cluster expansion. `--in-place` / `--in-place=.bak`
@@ -41,7 +37,11 @@ func isSedSafe(args []*syntax.Word, ctx evalContext) bool {
 	_, hasShortI := parsed.flags["i"]
 	_, hasLongI := parsed.flags["in-place"]
 	if !hasShortI && !hasLongI {
-		return true
+		return parsed.allLiteral
+	}
+	if !parsed.allLiteral {
+		// Dynamic in-place targets can't be verified — be conservative.
+		return false
 	}
 
 	// In-place edit. Determine which positionals are file paths:
@@ -59,7 +59,7 @@ func isSedSafe(args []*syntax.Word, ctx evalContext) bool {
 		return false
 	}
 	for _, w := range files {
-		path := wordLiteralPath(w)
+		path := wordLiteralPathWithContext(w, ctx)
 		if path == "" {
 			return false
 		}

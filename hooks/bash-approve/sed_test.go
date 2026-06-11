@@ -35,11 +35,14 @@ func TestIsSedSafe(t *testing.T) {
 		// (auto-approve). false = drop to ask via fallback.
 		want bool
 	}{
-		// No -i: read-only sed always passes regardless of cwd.
+		// No -i: read-only sed passes when its args decode statically.
 		{"plain substitution", "sed 's/foo/bar/' file", evalContext{}, true},
 		{"print range", "sed -n '1,5p' file", evalContext{}, true},
 		{"-e expression", "sed -e 's/a/b/' -e 's/c/d/' file", evalContext{}, true},
 		{"-f script", "sed -f script.sed file", evalContext{}, true},
+		{"assigned var path", "sed -n '1,5p' $P/file", evalContext{shellVars: map[string]string{"P": "/tmp/pkg"}}, true},
+		{"quoted assigned var path", `sed -n '1,5p' "$P/file"`, evalContext{shellVars: map[string]string{"P": "/tmp/pkg"}}, true},
+		{"unknown var path", "sed -n '1,5p' $P/file", evalContext{}, false},
 
 		// -i without an in-repo cwd: nothing to validate, drop to ask.
 		{"in-place short outside repo", "sed -i 's/foo/bar/' file", evalContext{}, false},
@@ -92,6 +95,20 @@ func TestEvaluate_SedFlows(t *testing.T) {
 		require.NotNil(t, r)
 		assert.Equal(t, "sed", r.reason)
 		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("read-only sed with prior assignment allowed", func(t *testing.T) {
+		r := evaluateAll("P=/tmp/pkg; sed -n '1,5p' $P/file")
+		require.NotNil(t, r)
+		assert.Equal(t, "var assignment | sed", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("read-only sed with unknown var asks", func(t *testing.T) {
+		r := evaluateAll("sed -n '1,5p' $P/file")
+		require.NotNil(t, r)
+		assert.Equal(t, "sed", r.reason)
+		assert.Equal(t, decisionAsk, r.decision)
 	})
 
 	t.Run("sed -i in-repo allowed", func(t *testing.T) {

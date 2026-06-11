@@ -82,6 +82,7 @@ type result struct {
 type evalContext struct {
 	cwd                        string
 	safeCDPrefixes             []string
+	shellVars                  map[string]string
 	xargsHasPipelineInput      bool
 	xargsInputFromReadOnlyPipe bool
 	// wrapperPats and commandPats carry the config-filtered pattern
@@ -498,6 +499,9 @@ func mergeStmtResults(stmts []*syntax.Stmt, ctx evalContext, wrapperPats, comman
 		default:
 			noOpinion = true
 		}
+		if r.decision == decisionAllow {
+			recordStandaloneAssignments(stmt, &ctx)
+		}
 	}
 	out := approved(strings.Join(reasons, " | "))
 	// Priority: deny > ask > no-opinion > allow
@@ -793,6 +797,14 @@ func wordLiteral(w *syntax.Word) string {
 	return s
 }
 
+func wordLiteralWithContext(w *syntax.Word, ctx evalContext) string {
+	s, ok := wordDecodedLiteralWithContext(w, ctx)
+	if !ok {
+		return ""
+	}
+	return s
+}
+
 // wordLiteralPath is wordLiteral plus a tilde guard: bash expands a
 // leading unquoted `~` / `~user` to $HOME / a user's homedir at runtime,
 // so the validator must ask instead of comparing the literal text against
@@ -804,6 +816,15 @@ func wordLiteralPath(w *syntax.Word) string {
 		}
 	}
 	return wordLiteral(w)
+}
+
+func wordLiteralPathWithContext(w *syntax.Word, ctx evalContext) string {
+	if w != nil && len(w.Parts) > 0 {
+		if lit, ok := w.Parts[0].(*syntax.Lit); ok && hasUnquotedTildePrefix(lit.Value) {
+			return ""
+		}
+	}
+	return wordLiteralWithContext(w, ctx)
 }
 
 // hasUnquotedTildePrefix reports whether s starts with `~` (no
@@ -989,6 +1010,10 @@ func isWriteRedirect(op syntax.RedirOperator) bool {
 // string. A small set of pure-string command substitutions (echo) is decoded
 // statically so common bypass attempts via $(echo -rf) get caught.
 func wordDecodedLiteral(w *syntax.Word) (s string, ok bool) {
+	return wordDecodedLiteralWithContext(w, evalContext{})
+}
+
+func wordDecodedLiteralWithContext(w *syntax.Word, ctx evalContext) (s string, ok bool) {
 	if w == nil {
 		return "", true
 	}
@@ -1008,11 +1033,8 @@ func wordDecodedLiteral(w *syntax.Word) (s string, ok bool) {
 				sb.WriteString(p.Value)
 			}
 		case *syntax.DblQuoted:
-			if !dblQuotedDecodable(p) {
-				return "", false
-			}
-			decoded, err := expand.Literal(literalCfg, &syntax.Word{Parts: []syntax.WordPart{p}})
-			if err != nil {
+			decoded, ok := dblQuotedLiteral(p, ctx)
+			if !ok {
 				return "", false
 			}
 			sb.WriteString(decoded)
@@ -1022,11 +1044,91 @@ func wordDecodedLiteral(w *syntax.Word) (s string, ok bool) {
 				return "", false
 			}
 			sb.WriteString(val)
+		case *syntax.ParamExp:
+			val, ok := paramExpLiteral(p, ctx)
+			if !ok {
+				return "", false
+			}
+			sb.WriteString(val)
 		default:
 			return "", false
 		}
 	}
 	return sb.String(), true
+}
+
+func dblQuotedLiteral(p *syntax.DblQuoted, ctx evalContext) (string, bool) {
+	if !dblQuotedDecodableWithContext(p, ctx) {
+		return "", false
+	}
+	decoded, err := expand.Literal(literalConfigWithContext(ctx), &syntax.Word{Parts: []syntax.WordPart{p}})
+	if err != nil {
+		return "", false
+	}
+	return decoded, true
+}
+
+func paramExpLiteral(p *syntax.ParamExp, ctx evalContext) (string, bool) {
+	if p == nil || p.Param == nil || ctx.shellVars == nil {
+		return "", false
+	}
+	if p.Excl || p.Length || p.Width || p.Index != nil || p.Slice != nil ||
+		p.Repl != nil || p.Names != 0 || p.Exp != nil {
+		return "", false
+	}
+	val, ok := ctx.shellVars[p.Param.Value]
+	return val, ok
+}
+
+func literalConfigWithContext(ctx evalContext) *expand.Config {
+	if len(ctx.shellVars) == 0 {
+		return literalCfg
+	}
+	pairs := make([]string, 0, len(ctx.shellVars))
+	for name, value := range ctx.shellVars {
+		pairs = append(pairs, name+"="+value)
+	}
+	return &expand.Config{
+		Env:      expand.ListEnviron(pairs...),
+		CmdSubst: literalCfg.CmdSubst,
+	}
+}
+
+func recordStandaloneAssignments(stmt *syntax.Stmt, ctx *evalContext) {
+	if stmt == nil || ctx == nil {
+		return
+	}
+	call, ok := stmt.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Args) != 0 || len(call.Assigns) == 0 {
+		return
+	}
+	var updates map[string]string
+	for _, assign := range call.Assigns {
+		if assign.Name == nil {
+			continue
+		}
+		value := ""
+		if assign.Value != nil {
+			decoded, ok := wordDecodedLiteralWithContext(assign.Value, *ctx)
+			if !ok {
+				continue
+			}
+			value = decoded
+		}
+		if updates == nil {
+			updates = make(map[string]string)
+		}
+		updates[assign.Name.Value] = value
+	}
+	if len(updates) == 0 {
+		return
+	}
+	if ctx.shellVars == nil {
+		ctx.shellVars = make(map[string]string, len(updates))
+	}
+	for name, value := range updates {
+		ctx.shellVars[name] = value
+	}
 }
 
 // errUnhandledCmdSubst signals that a command substitution can't be evaluated
@@ -1249,10 +1351,18 @@ func hexDigit(b byte) int {
 // expand.Literal, silently producing matches based on default values
 // instead of the real runtime — so we fall back to the printed source.
 func dblQuotedDecodable(d *syntax.DblQuoted) bool {
+	return dblQuotedDecodableWithContext(d, evalContext{})
+}
+
+func dblQuotedDecodableWithContext(d *syntax.DblQuoted, ctx evalContext) bool {
 	for _, part := range d.Parts {
-		switch part.(type) {
+		switch p := part.(type) {
 		case *syntax.Lit, *syntax.CmdSubst:
 			// resolvable
+		case *syntax.ParamExp:
+			if _, ok := paramExpLiteral(p, ctx); !ok {
+				return false
+			}
 		default:
 			return false
 		}
