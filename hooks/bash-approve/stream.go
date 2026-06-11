@@ -40,7 +40,7 @@ func reasonIsReadOnlyStream(reason string) bool {
 	if reason == "" {
 		return false
 	}
-	for _, part := range strings.Split(reason, " | ") {
+	for part := range strings.SplitSeq(reason, " | ") {
 		if !reasonPartIsReadOnlyStream(part) {
 			return false
 		}
@@ -49,7 +49,7 @@ func reasonIsReadOnlyStream(reason string) bool {
 }
 
 func reasonPartIsReadOnlyStream(reason string) bool {
-	for _, part := range strings.Split(reason, "+") {
+	for part := range strings.SplitSeq(reason, "+") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			return false
