@@ -24,7 +24,7 @@
 #             git checkout . (deny), git clean -f (deny),
 #             git config core.worktree (deny)
 #   python:   pytest, python, ruff, uv, uvx
-#   node:     npm, npm audit fix (ask), npx, vitest, bun, bunx
+#   node:     npm, npm audit fix (ask), npx, node -e, playwright, vp, vitest, bun, bunx
 #   rust:     cargo, maturin
 #   make:     make
 #   nix:      nix, nix flake read, nix-build, nix-shell, nix-store query, nh build

@@ -206,7 +206,7 @@ To override a default, add the specific command name to `enabled` or `disabled`.
 | git | `git read op`, `git write op`, `git push`, `git tag`, `git destructive` (`git stash`, `git revert`, `git reset --hard`, `git checkout .`, `git clean -f`) |
 | jj | `jj read op`, `jj write op`, `jj git push` |
 | python | `pytest`, `python`, `ruff`, `uv`, `uvx` |
-| node | `npm`, `npx`, `node -e`, `bun`, `bunx`, `vitest` |
+| node | `npm`, `npx`, `node -e`, `playwright`, `vp`, `bun`, `bunx`, `vitest` |
 | rust | `cargo`, `maturin` |
 | shell | `read-only`, `sed` (denies in-place), `awk` (denies system/pipe/redirect), `tee` (in-repo only), `touch`, `mkdir`, `cp -n`, `ln -s`, `shell builtin`, `shell vars`, `process mgmt`, `eval`, `echo`, `cd`, `source`, `sleep`, `var assignment`, `shell destructive` (`rm -r`) |
 | go | `go`, `go mod vendor`, `go mod init`, `golangci-lint`, `ginkgo` |
