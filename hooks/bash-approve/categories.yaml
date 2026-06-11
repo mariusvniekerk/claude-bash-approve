@@ -3,6 +3,10 @@
 # The special group "all" enables everything not in "disabled".
 # "disabled" overrides "enabled" — use this to carve out exceptions.
 #
+# `safe_cd_prefixes` can list absolute directory prefixes where `cd` is allowed
+# in addition to the current repo and linked worktrees. Targets and existing
+# prefixes are resolved through symlinks before comparison.
+#
 # When this file is absent or has no enabled/disabled keys, all commands are approved.
 #
 # Some commands default to "ask" (fall through to Claude Code's permission prompt):
