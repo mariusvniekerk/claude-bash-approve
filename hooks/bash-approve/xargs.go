@@ -37,7 +37,7 @@ var xargsSafeAppendCommands = map[string]bool{
 	"cat": true, "head": true, "tail": true,
 	"wc": true, "file": true, "stat": true,
 	"grep": true, "rg": true, "egrep": true, "fgrep": true,
-	"jq": true,
+	"jq":     true,
 	"md5sum": true, "sha256sum": true, "sha1sum": true, "shasum": true,
 	"xxd": true, "od": true, "hexdump": true,
 	"echo": true, "printf": true, "true": true, "false": true,
@@ -132,12 +132,12 @@ func isXargsSafe(args []*syntax.Word, ctx evalContext) bool {
 				return false
 			}
 		}
-	} else if !xargsSafeAppendCommands[cmdLits[0]] {
+	} else if !ctx.xargsInputFromReadOnlyPipe && !xargsSafeAppendCommands[cmdLits[0]] {
 		// No -I/--replace: xargs appends each input record as
 		// additional positional arguments. For commands not in the
-		// safe-append list, that runtime-controlled tail can change
-		// the approval decision (e.g. `xargs touch`, `xargs mkdir`),
-		// so ask defensively.
+		// safe-append list, that runtime-controlled tail can change the
+		// approval decision, so ask unless the input stream is known to
+		// come entirely from read-only pipeline stages.
 		return false
 	}
 

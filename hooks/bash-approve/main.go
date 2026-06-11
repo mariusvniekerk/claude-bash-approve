@@ -80,8 +80,10 @@ type result struct {
 }
 
 type evalContext struct {
-	cwd            string
-	safeCDPrefixes []string
+	cwd                        string
+	safeCDPrefixes             []string
+	xargsHasPipelineInput      bool
+	xargsInputFromReadOnlyPipe bool
 	// wrapperPats and commandPats carry the config-filtered pattern
 	// lists through nested evaluation (find -exec, xargs, awk system).
 	// evaluate() seeds them on every call so they are always populated;
@@ -597,7 +599,17 @@ func evaluateBinaryCmd(bc *syntax.BinaryCmd, ctx evalContext, wrapperPats, comma
 	if left == nil {
 		return nil
 	}
-	right := evaluateStmt(bc.Y, ctx, wrapperPats, commandPats)
+	rightCtx := ctx
+	if bc.Op == syntax.Pipe {
+		leftReadOnlyStream := isReadOnlyStreamStmt(bc.X, ctx, wrapperPats, commandPats)
+		rightCtx.xargsHasPipelineInput = true
+		if ctx.xargsHasPipelineInput {
+			rightCtx.xargsInputFromReadOnlyPipe = ctx.xargsInputFromReadOnlyPipe && leftReadOnlyStream
+		} else {
+			rightCtx.xargsInputFromReadOnlyPipe = leftReadOnlyStream
+		}
+	}
+	right := evaluateStmt(bc.Y, rightCtx, wrapperPats, commandPats)
 	if right == nil {
 		return nil
 	}
