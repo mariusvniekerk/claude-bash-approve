@@ -26,12 +26,16 @@ type parsedArgs struct {
 // Short flags are expanded via spec.short; combined flags like -sLd are split.
 // Unknown flags are kept verbatim (minus leading dashes).
 func parseArgs(args []*syntax.Word, spec flagSpec) parsedArgs {
+	return parseArgsWithContext(args, spec, evalContext{})
+}
+
+func parseArgsWithContext(args []*syntax.Word, spec flagSpec, ctx evalContext) parsedArgs {
 	result := parsedArgs{
 		flags:      make(map[string]*syntax.Word),
 		allLiteral: true,
 	}
 	for i := 0; i < len(args); i++ {
-		lit := wordLiteral(args[i])
+		lit := wordLiteralWithContext(args[i], ctx)
 		if lit == "" {
 			result.allLiteral = false
 			result.positional = append(result.positional, args[i])
