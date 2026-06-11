@@ -88,7 +88,11 @@ func isReadOnlySedSafe(args []*syntax.Word) bool {
 			if hasProgram {
 				continue
 			}
-			return false
+			if !isCmdSubstSedProgram(args[i]) {
+				return false
+			}
+			hasProgram = true
+			continue
 		}
 		if !afterDoubleDash && lit == "--" {
 			afterDoubleDash = true
@@ -126,7 +130,7 @@ func scanLongSedFlag(lit string, args []*syntax.Word, idx *int, hasProgram *bool
 	}
 	if !strings.Contains(lit, "=") {
 		(*idx)++
-		if *idx >= len(args) || wordLiteral(args[*idx]) == "" {
+		if *idx >= len(args) || !isSedProgramArgSafe(args[*idx]) {
 			return false
 		}
 	}
@@ -149,7 +153,7 @@ func scanShortSedFlags(lit string, args []*syntax.Word, idx *int, hasProgram *bo
 		}
 		if j+1 >= len(lit) {
 			(*idx)++
-			if *idx >= len(args) || wordLiteral(args[*idx]) == "" {
+			if *idx >= len(args) || !isSedProgramArgSafe(args[*idx]) {
 				return false
 			}
 		}
@@ -157,4 +161,43 @@ func scanShortSedFlags(lit string, args []*syntax.Word, idx *int, hasProgram *bo
 		return true
 	}
 	return true
+}
+
+func isSedProgramArgSafe(w *syntax.Word) bool {
+	if wordLiteral(w) != "" {
+		return true
+	}
+	return isCmdSubstSedProgram(w)
+}
+
+func isCmdSubstSedProgram(w *syntax.Word) bool {
+	if w == nil {
+		return false
+	}
+	sawCmdSubst := false
+	for _, part := range w.Parts {
+		if !sedProgramPartAllowsCmdSubst(part, &sawCmdSubst) {
+			return false
+		}
+	}
+	return sawCmdSubst
+}
+
+func sedProgramPartAllowsCmdSubst(part syntax.WordPart, sawCmdSubst *bool) bool {
+	switch p := part.(type) {
+	case *syntax.Lit, *syntax.SglQuoted:
+		return true
+	case *syntax.CmdSubst:
+		*sawCmdSubst = true
+		return true
+	case *syntax.DblQuoted:
+		for _, inner := range p.Parts {
+			if !sedProgramPartAllowsCmdSubst(inner, sawCmdSubst) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }
