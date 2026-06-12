@@ -35,14 +35,21 @@ func TestIsSedSafe(t *testing.T) {
 		// (auto-approve). false = drop to ask via fallback.
 		want bool
 	}{
-		// No -i: read-only sed passes when its args decode statically.
+		// No -i: read-only sed passes once flags and program are static;
+		// input file operands may be dynamic.
 		{"plain substitution", "sed 's/foo/bar/' file", evalContext{}, true},
 		{"print range", "sed -n '1,5p' file", evalContext{}, true},
 		{"-e expression", "sed -e 's/a/b/' -e 's/c/d/' file", evalContext{}, true},
 		{"-f script", "sed -f script.sed file", evalContext{}, true},
 		{"assigned var path", "sed -n '1,5p' $P/file", evalContext{shellVars: map[string]string{"P": "/tmp/pkg"}}, true},
 		{"quoted assigned var path", `sed -n '1,5p' "$P/file"`, evalContext{shellVars: map[string]string{"P": "/tmp/pkg"}}, true},
-		{"unknown var path", "sed -n '1,5p' $P/file", evalContext{}, false},
+		{"unknown var path", "sed -n '1,5p' $P/file", evalContext{}, true},
+		{"dynamic input file", "sed -n '1,5p' $FILE", evalContext{}, true},
+		{"dynamic input file after long expression", "sed --expression '1,5p' $FILE", evalContext{}, true},
+		{"command substitution range program", `sed -n "$(grep -n 'func x' file | cut -d: -f1),+35p" file`, evalContext{}, true},
+		{"command substitution expression flag", `sed -n -e "$(grep -n 'func x' file | cut -d: -f1),+35p" file`, evalContext{}, true},
+		{"dynamic sed program", "sed -n $PROGRAM file", evalContext{}, false},
+		{"dynamic sed flag", "sed $FLAGS '1,5p' file", evalContext{}, false},
 
 		// -i without an in-repo cwd: nothing to validate, drop to ask.
 		{"in-place short outside repo", "sed -i 's/foo/bar/' file", evalContext{}, false},
@@ -104,11 +111,25 @@ func TestEvaluate_SedFlows(t *testing.T) {
 		assert.Equal(t, decisionAllow, r.decision)
 	})
 
-	t.Run("read-only sed with unknown var asks", func(t *testing.T) {
-		r := evaluateAll("sed -n '1,5p' $P/file")
+	t.Run("read-only sed with go env assigned file path allowed", func(t *testing.T) {
+		r := evaluateAll("GOMODCACHE=$(go env GOMODCACHE); sed -n '195,215p' $GOMODCACHE/gitlab.com/gitlab-org/api/client-go@v1.46.0/issues.go")
+		require.NotNil(t, r)
+		assert.Equal(t, "var assignment | sed", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("read-only sed with dynamic program asks", func(t *testing.T) {
+		r := evaluateAll("sed -n $PROGRAM file")
 		require.NotNil(t, r)
 		assert.Equal(t, "sed", r.reason)
 		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("read-only sed with command substitution range allowed", func(t *testing.T) {
+		r := evaluateAll(`sed -n "$(grep -n 'func providerCapabilitiesFromPlatform' internal/server/api_types.go | cut -d: -f1),+35p" internal/server/api_types.go`)
+		require.NotNil(t, r)
+		assert.Equal(t, "sed", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
 	})
 
 	t.Run("sed -i in-repo allowed", func(t *testing.T) {

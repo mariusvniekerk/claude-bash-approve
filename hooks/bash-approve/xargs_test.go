@@ -127,6 +127,10 @@ func TestXargsReadOnlyPipelineCanAppendToAllowedCommands(t *testing.T) {
 			name: "git read pipeline to touch",
 			cmd:  `git ls-files | xargs touch`,
 		},
+		{
+			name: "git status awk filter to git restore",
+			cmd:  `git status --short | grep "^ M" | awk '{print $2}' | grep -v "^process-compose.yml$" | xargs git restore -- && git status --short | grep -v "^??"`,
+		},
 	}
 
 	for _, tt := range tests {

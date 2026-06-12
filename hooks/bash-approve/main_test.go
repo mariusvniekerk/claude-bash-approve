@@ -64,6 +64,7 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"git merge", "git merge feature-branch", "git write op"},
 		{"git pull", "git pull origin main", "git write op"},
 		{"git rebase", "git rebase main", "git write op"},
+		{"git restore", "git restore -- foo.go", "git write op"},
 		{"git stash list -C path", "git -C /repo stash list", "git read op"},
 		{"git cherry-pick", "git cherry-pick abc123", "git write op"},
 		{"git cherry-pick skip", "git -C /repo cherry-pick --skip", "git write op"},
