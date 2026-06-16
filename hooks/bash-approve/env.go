@@ -142,6 +142,7 @@ var envAllowStaticValues = map[string]func(string) bool{
 	"JAVA_OPTIONS":          isSafeJvmOptions,
 	"JAVA_TOOL_OPTIONS":     isSafeJvmOptions,
 	"MAVEN_OPTS":            isSafeJvmOptions,
+	"MAKEFLAGS":             isSafeMakeFlags,
 	"NODE_OPTIONS":          isSafeNodeOptions,
 	"RUSTFLAGS":             isSafeRustFlags,
 	"_JAVA_OPTIONS":         isSafeJvmOptions,
@@ -366,6 +367,44 @@ func isSafeRustCodegenOption(option string) bool {
 	default:
 		return false
 	}
+}
+
+func isSafeMakeFlags(value string) bool {
+	tokens := strings.Fields(value)
+	for i := 0; i < len(tokens); i++ {
+		token := tokens[i]
+		switch {
+		case token == "-j" || token == "--jobs" || token == "-l" || token == "--load-average" || token == "--max-load" || token == "-O" || token == "--output-sync":
+			if i+1 >= len(tokens) || strings.HasPrefix(tokens[i+1], "-") {
+				return false
+			}
+			i++
+		case token == "-k" || token == "--keep-going" ||
+			token == "-s" || token == "--silent" ||
+			token == "--no-print-directory" ||
+			token == "--warn-undefined-variables" ||
+			token == "--trace":
+			continue
+		case strings.HasPrefix(token, "-j") && len(token) > 2:
+			continue
+		case strings.HasPrefix(token, "-l") && len(token) > 2:
+			continue
+		case strings.HasPrefix(token, "-O") && len(token) > 2:
+			continue
+		case strings.HasPrefix(token, "--jobs=") ||
+			strings.HasPrefix(token, "--load-average=") ||
+			strings.HasPrefix(token, "--max-load=") ||
+			strings.HasPrefix(token, "--output-sync=") ||
+			strings.HasPrefix(token, "--shuffle=") ||
+			strings.HasPrefix(token, "--debug="):
+			continue
+		case token == "--shuffle" || token == "--debug":
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // validateStandaloneAssignments is the lenient counterpart used by

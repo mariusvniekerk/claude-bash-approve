@@ -122,6 +122,8 @@ func TestEnvAllowStaticValues(t *testing.T) {
 		{"JAVA_TOOL_OPTIONS javaagent", "JAVA_TOOL_OPTIONS", "-javaagent:/tmp/agent.jar", false},
 		{"MAVEN_OPTS memory", "MAVEN_OPTS", "-Xmx2g -Dmaven.repo.local=/tmp/m2", true},
 		{"MAVEN_OPTS agentlib", "MAVEN_OPTS", "-agentlib:jdwp=transport=dt_socket", false},
+		{"MAKEFLAGS jobs output sync", "MAKEFLAGS", "-j4 --output-sync=target", true},
+		{"MAKEFLAGS file", "MAKEFLAGS", "-f /tmp/Makefile", false},
 		{"NODE_OPTIONS memory", "NODE_OPTIONS", "--max-old-space-size=3072", true},
 		{"NODE_OPTIONS require", "NODE_OPTIONS", "--require ./hook.js", false},
 		{"NODE_OPTIONS loader", "NODE_OPTIONS", "--experimental-loader=./loader.mjs", false},
@@ -394,6 +396,19 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 		assert.Equal(t, decisionAsk, r.decision)
 	})
 
+	t.Run("MAKEFLAGS safe value allows", func(t *testing.T) {
+		r := evaluateAll(`MAKEFLAGS="-j4 --output-sync=target" make test`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "env vars+make", r.reason)
+	})
+
+	t.Run("MAKEFLAGS file still asks", func(t *testing.T) {
+		r := evaluateAll(`MAKEFLAGS="-f /tmp/Makefile" make test`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
 	t.Run("FOO unknown asks", func(t *testing.T) {
 		r := evaluateAll("FOO=bar pytest")
 		require.NotNil(t, r)
@@ -573,6 +588,18 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 
 	t.Run("standalone CARGO_BUILD_RUSTFLAGS dangerous value asks", func(t *testing.T) {
 		r := evaluateAll("CARGO_BUILD_RUSTFLAGS=-Clinker=/tmp/cc")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("standalone MAKEFLAGS safe value allows", func(t *testing.T) {
+		r := evaluateAll("MAKEFLAGS=-j4")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("standalone MAKEFLAGS dangerous value asks", func(t *testing.T) {
+		r := evaluateAll("MAKEFLAGS=-f")
 		require.NotNil(t, r)
 		assert.Equal(t, decisionAsk, r.decision)
 	})
