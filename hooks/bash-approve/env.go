@@ -140,6 +140,7 @@ var envAllowStaticValues = map[string]func(string) bool{
 	"JAVA_OPTIONS":      isSafeJvmOptions,
 	"JAVA_TOOL_OPTIONS": isSafeJvmOptions,
 	"NODE_OPTIONS":      isSafeNodeOptions,
+	"_JAVA_OPTIONS":     isSafeJvmOptions,
 }
 
 // validateEnvVarNames applies hard-deny → ask → allowlist → default-ask.
