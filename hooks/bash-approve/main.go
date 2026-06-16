@@ -441,7 +441,7 @@ func evaluateCommand(cmd syntax.Command, ctx evalContext, wrapperPats, commandPa
 		if r, prop := checkForLoop(c.Loop, ctx, wrapperPats, commandPats); prop {
 			return r
 		}
-		return evaluateBlock(c.Do, ctx, wrapperPats, commandPats, "for")
+		return evaluateBlock(c.Do, contextWithStaticWordIter(ctx, c.Loop), wrapperPats, commandPats, "for")
 	case *syntax.WhileClause:
 		for _, stmt := range c.Cond {
 			r := evaluateStmt(stmt, ctx, wrapperPats, commandPats)
@@ -598,6 +598,37 @@ func checkForLoop(loop syntax.Loop, ctx evalContext, wrapperPats, commandPats []
 	return nil, false
 }
 
+func contextWithStaticWordIter(ctx evalContext, loop syntax.Loop) evalContext {
+	iter, ok := loop.(*syntax.WordIter)
+	if !ok || iter.Name == nil || len(iter.Items) == 0 {
+		return ctx
+	}
+	var representative string
+	for i, word := range iter.Items {
+		value, ok := wordDecodedLiteralWithContext(word, ctx)
+		if !ok || !isSafeLoopVarLiteral(value) {
+			return ctx
+		}
+		if i == 0 {
+			representative = value
+		}
+	}
+	next := ctx
+	next.shellVars = maps.Clone(ctx.shellVars)
+	if next.shellVars == nil {
+		next.shellVars = make(map[string]string, 1)
+	}
+	next.shellVars[iter.Name.Value] = representative
+	return next
+}
+
+func isSafeLoopVarLiteral(value string) bool {
+	if strings.HasPrefix(value, "-") || strings.Contains(value, "..") {
+		return false
+	}
+	return !strings.ContainsAny(value, "/\x00*?[")
+}
+
 // evaluateBinaryCmd handles &&, ||, | chains.
 func evaluateBinaryCmd(bc *syntax.BinaryCmd, ctx evalContext, wrapperPats, commandPats []pattern) *result {
 	left := evaluateStmt(bc.X, ctx, wrapperPats, commandPats)
@@ -647,7 +678,7 @@ func evaluateCallExpr(call *syntax.CallExpr, ctx evalContext, wrapperPats, comma
 			return r
 		}
 		out := approved("var assignment")
-		if r := validateStandaloneAssignNames(assignNames(call.Assigns)); r != nil {
+		if r := validateStandaloneAssignments(envAssignmentsFromSyntax(call.Assigns)); r != nil {
 			out.decision = r.decision
 			out.denyReason = r.denyReason
 		}
@@ -953,7 +984,7 @@ func validateRedirect(redir *syntax.Redirect, ctx evalContext) *result {
 	if hasUnquotedGlob(redir.Word) {
 		return &result{decision: decisionAsk}
 	}
-	target := wordLiteralPath(redir.Word)
+	target := wordLiteralPathWithContext(redir.Word, ctx)
 	if target == "" {
 		return &result{decision: decisionAsk}
 	}

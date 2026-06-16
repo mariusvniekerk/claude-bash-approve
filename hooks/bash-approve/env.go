@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 
 	"mvdan.cc/sh/v3/syntax"
@@ -28,16 +29,6 @@ func envAssignmentsFromSyntax(assigns []*syntax.Assign) []envAssignment {
 		out = append(out, envAssign)
 	}
 	return out
-}
-
-func assignNames(assigns []*syntax.Assign) []string {
-	names := make([]string, 0, len(assigns))
-	for _, assign := range assigns {
-		if assign.Name != nil {
-			names = append(names, assign.Name.Value)
-		}
-	}
-	return names
 }
 
 // envHardDeny lists env-var names that should never auto-execute. These are
@@ -144,6 +135,20 @@ var envAllowExactValues = map[string]map[string]bool{
 	"GIT_EDITOR": {"true": true},
 }
 
+var envAllowStaticValues = map[string]func(string) bool{
+	"CARGO_BUILD_RUSTFLAGS": isSafeRustFlags,
+	"GOFLAGS":               isSafeGoFlags,
+	"GRADLE_OPTS":           isSafeJvmOptions,
+	"JAVA_OPTS":             isSafeJvmOptions,
+	"JAVA_OPTIONS":          isSafeJvmOptions,
+	"JAVA_TOOL_OPTIONS":     isSafeJvmOptions,
+	"MAVEN_OPTS":            isSafeJvmOptions,
+	"MAKEFLAGS":             isSafeMakeFlags,
+	"NODE_OPTIONS":          isSafeNodeOptions,
+	"RUSTFLAGS":             isSafeRustFlags,
+	"_JAVA_OPTIONS":         isSafeJvmOptions,
+}
+
 // validateEnvVarNames applies hard-deny → ask → allowlist → default-ask.
 // Hard-deny is checked across ALL names first so it can't be bypassed by
 // putting an unknown var earlier in the list.
@@ -172,6 +177,12 @@ func validateEnvAssignments(assignments []envAssignment) *result {
 		if allowedValues, ok := envAllowExactValues[name]; ok && assignment.staticValue && allowedValues[assignment.value] {
 			continue
 		}
+		if allowStaticValue, ok := envAllowStaticValues[name]; ok {
+			if assignment.staticValue && allowStaticValue(assignment.value) {
+				continue
+			}
+			return &result{decision: decisionAsk}
+		}
 		if envAskExact[name] {
 			return &result{decision: decisionAsk}
 		}
@@ -196,23 +207,216 @@ func validateEnvAssignments(assignments []envAssignment) *result {
 	return nil
 }
 
-// validateStandaloneAssignNames is the lenient counterpart used by
+func isSafeNodeOptions(value string) bool {
+	return !slices.ContainsFunc(strings.Fields(value), isDangerousNodeOption)
+}
+
+func isDangerousNodeOption(option string) bool {
+	dangerousLong := []string{
+		"--env-file",
+		"--env-file-if-exists",
+		"--eval",
+		"--experimental-loader",
+		"--import",
+		"--inspect",
+		"--inspect-brk",
+		"--loader",
+		"--require",
+	}
+	for _, flag := range dangerousLong {
+		if option == flag || strings.HasPrefix(option, flag+"=") {
+			return true
+		}
+	}
+	return option == "-e" || option == "-r" || strings.HasPrefix(option, "-e=") || strings.HasPrefix(option, "-r=")
+}
+
+func isSafeGoFlags(value string) bool {
+	return !slices.ContainsFunc(strings.Fields(value), isDangerousGoFlag)
+}
+
+func isDangerousGoFlag(option string) bool {
+	dangerous := []string{
+		"-exec",
+		"-toolexec",
+	}
+	for _, flag := range dangerous {
+		if option == flag || strings.HasPrefix(option, flag+"=") {
+			return true
+		}
+	}
+	return false
+}
+
+func isSafeJvmOptions(value string) bool {
+	return !slices.ContainsFunc(strings.Fields(value), isDangerousJvmOption)
+}
+
+func isDangerousJvmOption(option string) bool {
+	if strings.HasPrefix(option, "@") {
+		return true
+	}
+	dangerousPrefixes := []string{
+		"-agentlib:",
+		"-agentpath:",
+		"-javaagent:",
+		"-Xbootclasspath",
+		"-Xdebug",
+		"-Xrunjdwp",
+		"-classpath",
+		"--class-path",
+		"--module-path",
+		"-cp",
+		"-XX:OnError=",
+		"-XX:OnOutOfMemoryError=",
+	}
+	for _, prefix := range dangerousPrefixes {
+		if option == prefix || strings.HasPrefix(option, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func isSafeRustFlags(value string) bool {
+	tokens := strings.Fields(value)
+	for i := 0; i < len(tokens); i++ {
+		token := tokens[i]
+		switch {
+		case isRustLintFlagWithValue(token):
+			continue
+		case isRustSplitLintFlag(token):
+			if i+1 >= len(tokens) || strings.HasPrefix(tokens[i+1], "-") {
+				return false
+			}
+			i++
+		case token == "--cfg":
+			if i+1 >= len(tokens) || strings.HasPrefix(tokens[i+1], "-") {
+				return false
+			}
+			i++
+		case strings.HasPrefix(token, "--cfg="):
+			continue
+		case token == "-C":
+			if i+1 >= len(tokens) || !isSafeRustCodegenOption(tokens[i+1]) {
+				return false
+			}
+			i++
+		case strings.HasPrefix(token, "-C"):
+			if !isSafeRustCodegenOption(strings.TrimPrefix(token, "-C")) {
+				return false
+			}
+		case strings.HasPrefix(token, "--remap-path-prefix="):
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func isRustSplitLintFlag(token string) bool {
+	return token == "-A" || token == "-W" || token == "-D" || token == "-F"
+}
+
+func isRustLintFlagWithValue(token string) bool {
+	if len(token) <= 2 {
+		return false
+	}
+	prefix := token[:2]
+	return prefix == "-A" || prefix == "-W" || prefix == "-D" || prefix == "-F"
+}
+
+func isSafeRustCodegenOption(option string) bool {
+	key := option
+	if before, _, ok := strings.Cut(option, "="); ok {
+		key = before
+	}
+	switch key {
+	case "codegen-units",
+		"debuginfo",
+		"debug-assertions",
+		"embed-bitcode",
+		"extra-filename",
+		"incremental",
+		"lto",
+		"metadata",
+		"opt-level",
+		"overflow-checks",
+		"panic",
+		"prefer-dynamic",
+		"relocation-model",
+		"strip",
+		"target-cpu",
+		"target-feature":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSafeMakeFlags(value string) bool {
+	tokens := strings.Fields(value)
+	for i := 0; i < len(tokens); i++ {
+		token := tokens[i]
+		switch {
+		case token == "-j" || token == "--jobs" || token == "-l" || token == "--load-average" || token == "--max-load" || token == "-O" || token == "--output-sync":
+			if i+1 >= len(tokens) || strings.HasPrefix(tokens[i+1], "-") {
+				return false
+			}
+			i++
+		case token == "-k" || token == "--keep-going" ||
+			token == "-s" || token == "--silent" ||
+			token == "--no-print-directory" ||
+			token == "--warn-undefined-variables" ||
+			token == "--trace":
+			continue
+		case strings.HasPrefix(token, "-j") && len(token) > 2:
+			continue
+		case strings.HasPrefix(token, "-l") && len(token) > 2:
+			continue
+		case strings.HasPrefix(token, "-O") && len(token) > 2:
+			continue
+		case strings.HasPrefix(token, "--jobs=") ||
+			strings.HasPrefix(token, "--load-average=") ||
+			strings.HasPrefix(token, "--max-load=") ||
+			strings.HasPrefix(token, "--output-sync=") ||
+			strings.HasPrefix(token, "--shuffle=") ||
+			strings.HasPrefix(token, "--debug="):
+			continue
+		case token == "--shuffle" || token == "--debug":
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// validateStandaloneAssignments is the lenient counterpart used by
 // standalone assignments (`FOO=bar` with no command on the same line).
 // Hard-deny / ask-exact / LD_*/DYLD_* still flag dangerous names, but
 // unknown names auto-approve — bash convention treats lowercase locals
 // like `hm_src=...` and most uppercase project-specific knobs as benign,
 // and the strict allowlist would otherwise prompt on every one of them.
 // Names that don't match any of the dangerous lists return nil.
-func validateStandaloneAssignNames(names []string) *result {
-	for _, name := range names {
-		if envHardDeny[name] {
+func validateStandaloneAssignments(assignments []envAssignment) *result {
+	for _, assignment := range assignments {
+		if envHardDeny[assignment.name] {
 			return &result{
 				decision:   decisionDeny,
-				denyReason: "BLOCKED: env var " + name + " can subvert command execution. Use a safer alternative.",
+				denyReason: "BLOCKED: env var " + assignment.name + " can subvert command execution. Use a safer alternative.",
 			}
 		}
 	}
-	for _, name := range names {
+	for _, assignment := range assignments {
+		name := assignment.name
+		if allowStaticValue, ok := envAllowStaticValues[name]; ok {
+			if assignment.staticValue && allowStaticValue(assignment.value) {
+				continue
+			}
+			return &result{decision: decisionAsk}
+		}
 		if envAskExact[name] {
 			return &result{decision: decisionAsk}
 		}

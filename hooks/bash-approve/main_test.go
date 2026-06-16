@@ -549,6 +549,7 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"for loop simple", "for f in *.go; do echo $f; done", "for{echo}"},
 		{"for loop multi cmd", "for id in 1 2 3; do echo \"=== $id ===\"; git status; done", "for{echo | git read op}"},
 		{"for loop with pipe", "for id in 260 261; do\n  echo \"=== JOB $id ===\"\n  roborev show --job $id --json 2>&1 | python3 -c \"import json,sys; print('ok')\"\n  echo \"\"\ndone", "for{echo | roborev show | python | echo}"},
+		{"for loop roborev show with echo cmdsubst", `for j in 1908 1909; do roborev show --job $j --json > /tmp/rr2_$j.json 2>/dev/null; echo "$j: exit=$? verdict=$(python3 -c "import json;d=json.load(open('/tmp/rr2_$j.json'));print(d.get('job',{}).get('verdict'),'closed='+str(d.get('closed')))" 2>/dev/null)"; done`, "for{roborev show | echo}"},
 		{"for loop with seq and wait", "for i in $(seq 1 5); do\n  go test ./... &\ndone\nwait", "for{go} | shell builtin"},
 		{"for loop with grpcurl", "for io in 219129 220338; do\n  echo \"=== IO $io ===\"\n  grpcurl -plaintext localhost:50051 list\ndone", "for{echo | grpcurl}"},
 
@@ -652,6 +653,19 @@ func TestEvaluate_Rejected(t *testing.T) {
 		assert.Equal(t, "deny", r.decision)
 		assert.Contains(t, r.denyReason, "rm -r is banned")
 	})
+}
+
+func TestForLoopStaticVarTmpRedirectAllows(t *testing.T) {
+	r := evaluateAll(`for j in 1908 1909; do roborev show --job $j --json > /tmp/rr2_$j.json 2>/dev/null; echo "$j: exit=$? verdict=$(python3 -c "import json;d=json.load(open('/tmp/rr2_$j.json'));print(d.get('job',{}).get('verdict'),'closed='+str(d.get('closed')))" 2>/dev/null)"; done`)
+	require.NotNil(t, r)
+	assert.Equal(t, decisionAllow, r.decision)
+	assert.Equal(t, "for{roborev show | echo}", r.reason)
+}
+
+func TestForLoopDynamicTmpRedirectTraversalAsks(t *testing.T) {
+	r := evaluateAll(`for j in ../../etc/passwd; do roborev show --job 1 --json > /tmp/rr2_$j.json; done`)
+	require.NotNil(t, r)
+	assert.Equal(t, decisionAsk, r.decision)
 }
 
 func TestEvaluate_Wrappers(t *testing.T) {

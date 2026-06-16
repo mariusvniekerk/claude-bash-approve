@@ -19,3 +19,7 @@ golangci-lint run ./...      # lint
 ## Testing
 
 1. Avoid tautological tests that purely test the existance of code/config files already present in the codebase.
+
+## Telemetry
+
+1. When a screenshot or question involves a bash-approve decision, always check the telemetry database first for a recent similar command before diagnosing or proposing fixes.
