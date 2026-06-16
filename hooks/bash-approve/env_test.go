@@ -108,6 +108,8 @@ func TestEnvAllowStaticValues(t *testing.T) {
 		{"GOFLAGS toolexec split", "GOFLAGS", "-toolexec /tmp/wrap", false},
 		{"GOFLAGS exec equals", "GOFLAGS", "-exec=/tmp/runner", false},
 		{"GOFLAGS exec split", "GOFLAGS", "-exec /tmp/runner", false},
+		{"JAVA_TOOL_OPTIONS memory", "JAVA_TOOL_OPTIONS", "-Xmx2g -Dfile.encoding=UTF-8", true},
+		{"JAVA_TOOL_OPTIONS javaagent", "JAVA_TOOL_OPTIONS", "-javaagent:/tmp/agent.jar", false},
 		{"NODE_OPTIONS memory", "NODE_OPTIONS", "--max-old-space-size=3072", true},
 		{"NODE_OPTIONS require", "NODE_OPTIONS", "--require ./hook.js", false},
 		{"NODE_OPTIONS loader", "NODE_OPTIONS", "--experimental-loader=./loader.mjs", false},
@@ -273,6 +275,19 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 		assert.Equal(t, decisionAsk, r.decision)
 	})
 
+	t.Run("JAVA_TOOL_OPTIONS safe value allows", func(t *testing.T) {
+		r := evaluateAll(`JAVA_TOOL_OPTIONS="-Xmx2g -Dfile.encoding=UTF-8" go test ./...`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "env vars+go", r.reason)
+	})
+
+	t.Run("JAVA_TOOL_OPTIONS javaagent still asks", func(t *testing.T) {
+		r := evaluateAll(`JAVA_TOOL_OPTIONS="-javaagent:/tmp/agent.jar" go test ./...`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
 	t.Run("FOO unknown asks", func(t *testing.T) {
 		r := evaluateAll("FOO=bar pytest")
 		require.NotNil(t, r)
@@ -356,6 +371,18 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 
 	t.Run("standalone GOFLAGS dangerous value asks", func(t *testing.T) {
 		r := evaluateAll("GOFLAGS=-toolexec=/tmp/wrap")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("standalone JAVA_TOOL_OPTIONS safe value allows", func(t *testing.T) {
+		r := evaluateAll("JAVA_TOOL_OPTIONS=-Xmx2g")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("standalone JAVA_TOOL_OPTIONS dangerous value asks", func(t *testing.T) {
+		r := evaluateAll("JAVA_TOOL_OPTIONS=-javaagent:/tmp/agent.jar")
 		require.NotNil(t, r)
 		assert.Equal(t, decisionAsk, r.decision)
 	})

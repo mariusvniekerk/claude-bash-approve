@@ -135,8 +135,9 @@ var envAllowExactValues = map[string]map[string]bool{
 }
 
 var envAllowStaticValues = map[string]func(string) bool{
-	"GOFLAGS":      isSafeGoFlags,
-	"NODE_OPTIONS": isSafeNodeOptions,
+	"GOFLAGS":           isSafeGoFlags,
+	"JAVA_TOOL_OPTIONS": isSafeJvmOptions,
+	"NODE_OPTIONS":      isSafeNodeOptions,
 }
 
 // validateEnvVarNames applies hard-deny → ask → allowlist → default-ask.
@@ -242,6 +243,41 @@ func isDangerousGoFlag(option string) bool {
 	}
 	for _, flag := range dangerous {
 		if option == flag || strings.HasPrefix(option, flag+"=") {
+			return true
+		}
+	}
+	return false
+}
+
+func isSafeJvmOptions(value string) bool {
+	for _, option := range strings.Fields(value) {
+		if isDangerousJvmOption(option) {
+			return false
+		}
+	}
+	return true
+}
+
+func isDangerousJvmOption(option string) bool {
+	if strings.HasPrefix(option, "@") {
+		return true
+	}
+	dangerousPrefixes := []string{
+		"-agentlib:",
+		"-agentpath:",
+		"-javaagent:",
+		"-Xbootclasspath",
+		"-Xdebug",
+		"-Xrunjdwp",
+		"-classpath",
+		"--class-path",
+		"--module-path",
+		"-cp",
+		"-XX:OnError=",
+		"-XX:OnOutOfMemoryError=",
+	}
+	for _, prefix := range dangerousPrefixes {
+		if option == prefix || strings.HasPrefix(option, prefix) {
 			return true
 		}
 	}
