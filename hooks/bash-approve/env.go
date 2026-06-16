@@ -139,6 +139,7 @@ var envAllowStaticValues = map[string]func(string) bool{
 	"JAVA_OPTS":         isSafeJvmOptions,
 	"JAVA_OPTIONS":      isSafeJvmOptions,
 	"JAVA_TOOL_OPTIONS": isSafeJvmOptions,
+	"MAVEN_OPTS":        isSafeJvmOptions,
 	"NODE_OPTIONS":      isSafeNodeOptions,
 	"_JAVA_OPTIONS":     isSafeJvmOptions,
 }

@@ -116,6 +116,8 @@ func TestEnvAllowStaticValues(t *testing.T) {
 		{"JAVA_OPTS classpath", "JAVA_OPTS", "-classpath /tmp/classes", false},
 		{"JAVA_TOOL_OPTIONS memory", "JAVA_TOOL_OPTIONS", "-Xmx2g -Dfile.encoding=UTF-8", true},
 		{"JAVA_TOOL_OPTIONS javaagent", "JAVA_TOOL_OPTIONS", "-javaagent:/tmp/agent.jar", false},
+		{"MAVEN_OPTS memory", "MAVEN_OPTS", "-Xmx2g -Dmaven.repo.local=/tmp/m2", true},
+		{"MAVEN_OPTS agentlib", "MAVEN_OPTS", "-agentlib:jdwp=transport=dt_socket", false},
 		{"NODE_OPTIONS memory", "NODE_OPTIONS", "--max-old-space-size=3072", true},
 		{"NODE_OPTIONS require", "NODE_OPTIONS", "--require ./hook.js", false},
 		{"NODE_OPTIONS loader", "NODE_OPTIONS", "--experimental-loader=./loader.mjs", false},
@@ -333,6 +335,19 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 		assert.Equal(t, decisionAsk, r.decision)
 	})
 
+	t.Run("MAVEN_OPTS safe value allows", func(t *testing.T) {
+		r := evaluateAll(`MAVEN_OPTS="-Xmx2g -Dmaven.repo.local=/tmp/m2" go test ./...`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "env vars+go", r.reason)
+	})
+
+	t.Run("MAVEN_OPTS agentlib still asks", func(t *testing.T) {
+		r := evaluateAll(`MAVEN_OPTS="-agentlib:jdwp=transport=dt_socket" go test ./...`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
 	t.Run("FOO unknown asks", func(t *testing.T) {
 		r := evaluateAll("FOO=bar pytest")
 		require.NotNil(t, r)
@@ -464,6 +479,18 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 
 	t.Run("standalone _JAVA_OPTIONS dangerous value asks", func(t *testing.T) {
 		r := evaluateAll("_JAVA_OPTIONS=-XX:OnError=/tmp/hook")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("standalone MAVEN_OPTS safe value allows", func(t *testing.T) {
+		r := evaluateAll("MAVEN_OPTS=-Xmx2g")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("standalone MAVEN_OPTS dangerous value asks", func(t *testing.T) {
+		r := evaluateAll("MAVEN_OPTS=-agentlib:jdwp")
 		require.NotNil(t, r)
 		assert.Equal(t, decisionAsk, r.decision)
 	})
