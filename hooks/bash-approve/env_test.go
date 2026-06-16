@@ -94,6 +94,34 @@ func TestIsSafeEnvVarsWrapper(t *testing.T) {
 	}
 }
 
+func TestEnvAllowStaticValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		envName string
+		value   string
+		want    bool
+	}{
+		{"GOFLAGS buildvcs", "GOFLAGS", "-buildvcs=false", true},
+		{"GOFLAGS tags", "GOFLAGS", "-tags=fts5", true},
+		{"GOFLAGS trimpath and mod", "GOFLAGS", "-trimpath -mod=readonly", true},
+		{"GOFLAGS toolexec equals", "GOFLAGS", "-toolexec=/tmp/wrap", false},
+		{"GOFLAGS toolexec split", "GOFLAGS", "-toolexec /tmp/wrap", false},
+		{"GOFLAGS exec equals", "GOFLAGS", "-exec=/tmp/runner", false},
+		{"GOFLAGS exec split", "GOFLAGS", "-exec /tmp/runner", false},
+		{"NODE_OPTIONS memory", "NODE_OPTIONS", "--max-old-space-size=3072", true},
+		{"NODE_OPTIONS require", "NODE_OPTIONS", "--require ./hook.js", false},
+		{"NODE_OPTIONS loader", "NODE_OPTIONS", "--experimental-loader=./loader.mjs", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			allowStaticValue, ok := envAllowStaticValues[tt.envName]
+			require.True(t, ok)
+			assert.Equal(t, tt.want, allowStaticValue(tt.value))
+		})
+	}
+}
+
 func TestEvaluate_EnvVarFlows(t *testing.T) {
 	t.Run("LD_PRELOAD denied", func(t *testing.T) {
 		r := evaluateAll("LD_PRELOAD=/tmp/evil.so cat foo")
@@ -218,6 +246,33 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 		assert.Equal(t, decisionAsk, r.decision)
 	})
 
+	t.Run("GOFLAGS buildvcs allows go build after frontend build", func(t *testing.T) {
+		repo := initGitRepo(t)
+		r := evaluateAllInDir(`cd `+repo+`; make frontend > /tmp/fe2.log 2>&1 && echo "frontend built" && GOFLAGS="-buildvcs=false" go build -o ./cmd/e2e-server/e2e-server ./cmd/e2e-server && echo "e2e-server built"`, repo)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "cd | make | echo | env vars+go | echo", r.reason)
+	})
+
+	t.Run("GOFLAGS tags allows npm generate api", func(t *testing.T) {
+		r := evaluateAll(`CGO_ENABLED=1 GOFLAGS="-tags=fts5" npm run generate:api 2>&1 | head -40`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "env vars+npm | read-only", r.reason)
+	})
+
+	t.Run("GOFLAGS toolexec still asks", func(t *testing.T) {
+		r := evaluateAll(`GOFLAGS="-toolexec=/tmp/wrap" go build ./...`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("GOFLAGS exec still asks", func(t *testing.T) {
+		r := evaluateAll(`GOFLAGS="-exec=/tmp/runner" go run ./cmd/tool`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
 	t.Run("FOO unknown asks", func(t *testing.T) {
 		r := evaluateAll("FOO=bar pytest")
 		require.NotNil(t, r)
@@ -289,6 +344,18 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 
 	t.Run("standalone NODE_OPTIONS dangerous value asks", func(t *testing.T) {
 		r := evaluateAll("NODE_OPTIONS=--require=./hook.js")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("standalone GOFLAGS safe value allows", func(t *testing.T) {
+		r := evaluateAll("GOFLAGS=-buildvcs=false")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("standalone GOFLAGS dangerous value asks", func(t *testing.T) {
+		r := evaluateAll("GOFLAGS=-toolexec=/tmp/wrap")
 		require.NotNil(t, r)
 		assert.Equal(t, decisionAsk, r.decision)
 	})

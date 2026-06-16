@@ -134,6 +134,11 @@ var envAllowExactValues = map[string]map[string]bool{
 	"GIT_EDITOR": {"true": true},
 }
 
+var envAllowStaticValues = map[string]func(string) bool{
+	"GOFLAGS":      isSafeGoFlags,
+	"NODE_OPTIONS": isSafeNodeOptions,
+}
+
 // validateEnvVarNames applies hard-deny → ask → allowlist → default-ask.
 // Hard-deny is checked across ALL names first so it can't be bypassed by
 // putting an unknown var earlier in the list.
@@ -162,8 +167,8 @@ func validateEnvAssignments(assignments []envAssignment) *result {
 		if allowedValues, ok := envAllowExactValues[name]; ok && assignment.staticValue && allowedValues[assignment.value] {
 			continue
 		}
-		if name == "NODE_OPTIONS" {
-			if assignment.staticValue && isSafeNodeOptions(assignment.value) {
+		if allowStaticValue, ok := envAllowStaticValues[name]; ok {
+			if assignment.staticValue && allowStaticValue(assignment.value) {
 				continue
 			}
 			return &result{decision: decisionAsk}
@@ -221,6 +226,28 @@ func isDangerousNodeOption(option string) bool {
 	return option == "-e" || option == "-r" || strings.HasPrefix(option, "-e=") || strings.HasPrefix(option, "-r=")
 }
 
+func isSafeGoFlags(value string) bool {
+	for _, option := range strings.Fields(value) {
+		if isDangerousGoFlag(option) {
+			return false
+		}
+	}
+	return true
+}
+
+func isDangerousGoFlag(option string) bool {
+	dangerous := []string{
+		"-exec",
+		"-toolexec",
+	}
+	for _, flag := range dangerous {
+		if option == flag || strings.HasPrefix(option, flag+"=") {
+			return true
+		}
+	}
+	return false
+}
+
 // validateStandaloneAssignments is the lenient counterpart used by
 // standalone assignments (`FOO=bar` with no command on the same line).
 // Hard-deny / ask-exact / LD_*/DYLD_* still flag dangerous names, but
@@ -239,8 +266,8 @@ func validateStandaloneAssignments(assignments []envAssignment) *result {
 	}
 	for _, assignment := range assignments {
 		name := assignment.name
-		if name == "NODE_OPTIONS" {
-			if assignment.staticValue && isSafeNodeOptions(assignment.value) {
+		if allowStaticValue, ok := envAllowStaticValues[name]; ok {
+			if assignment.staticValue && allowStaticValue(assignment.value) {
 				continue
 			}
 			return &result{decision: decisionAsk}
