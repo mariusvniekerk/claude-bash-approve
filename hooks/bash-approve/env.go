@@ -135,15 +135,16 @@ var envAllowExactValues = map[string]map[string]bool{
 }
 
 var envAllowStaticValues = map[string]func(string) bool{
-	"GOFLAGS":           isSafeGoFlags,
-	"GRADLE_OPTS":       isSafeJvmOptions,
-	"JAVA_OPTS":         isSafeJvmOptions,
-	"JAVA_OPTIONS":      isSafeJvmOptions,
-	"JAVA_TOOL_OPTIONS": isSafeJvmOptions,
-	"MAVEN_OPTS":        isSafeJvmOptions,
-	"NODE_OPTIONS":      isSafeNodeOptions,
-	"RUSTFLAGS":         isSafeRustFlags,
-	"_JAVA_OPTIONS":     isSafeJvmOptions,
+	"CARGO_BUILD_RUSTFLAGS": isSafeRustFlags,
+	"GOFLAGS":               isSafeGoFlags,
+	"GRADLE_OPTS":           isSafeJvmOptions,
+	"JAVA_OPTS":             isSafeJvmOptions,
+	"JAVA_OPTIONS":          isSafeJvmOptions,
+	"JAVA_TOOL_OPTIONS":     isSafeJvmOptions,
+	"MAVEN_OPTS":            isSafeJvmOptions,
+	"NODE_OPTIONS":          isSafeNodeOptions,
+	"RUSTFLAGS":             isSafeRustFlags,
+	"_JAVA_OPTIONS":         isSafeJvmOptions,
 }
 
 // validateEnvVarNames applies hard-deny → ask → allowlist → default-ask.

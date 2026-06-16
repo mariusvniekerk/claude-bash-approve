@@ -101,6 +101,8 @@ func TestEnvAllowStaticValues(t *testing.T) {
 		value   string
 		want    bool
 	}{
+		{"CARGO_BUILD_RUSTFLAGS target cpu", "CARGO_BUILD_RUSTFLAGS", "-Ctarget-cpu=native", true},
+		{"CARGO_BUILD_RUSTFLAGS linker", "CARGO_BUILD_RUSTFLAGS", "-Clinker=/tmp/cc", false},
 		{"GOFLAGS buildvcs", "GOFLAGS", "-buildvcs=false", true},
 		{"GOFLAGS tags", "GOFLAGS", "-tags=fts5", true},
 		{"GOFLAGS trimpath and mod", "GOFLAGS", "-trimpath -mod=readonly", true},
@@ -379,6 +381,19 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 		assert.Equal(t, decisionAsk, r.decision)
 	})
 
+	t.Run("CARGO_BUILD_RUSTFLAGS safe value allows", func(t *testing.T) {
+		r := evaluateAll(`CARGO_BUILD_RUSTFLAGS="-Ctarget-cpu=native" cargo test`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "env vars+cargo", r.reason)
+	})
+
+	t.Run("CARGO_BUILD_RUSTFLAGS linker still asks", func(t *testing.T) {
+		r := evaluateAll(`CARGO_BUILD_RUSTFLAGS="-Clinker=/tmp/cc" cargo test`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
 	t.Run("FOO unknown asks", func(t *testing.T) {
 		r := evaluateAll("FOO=bar pytest")
 		require.NotNil(t, r)
@@ -546,6 +561,18 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 
 	t.Run("standalone RUSTFLAGS dangerous value asks", func(t *testing.T) {
 		r := evaluateAll("RUSTFLAGS=-Clinker=/tmp/cc")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("standalone CARGO_BUILD_RUSTFLAGS safe value allows", func(t *testing.T) {
+		r := evaluateAll("CARGO_BUILD_RUSTFLAGS=-Ctarget-cpu=native")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("standalone CARGO_BUILD_RUSTFLAGS dangerous value asks", func(t *testing.T) {
+		r := evaluateAll("CARGO_BUILD_RUSTFLAGS=-Clinker=/tmp/cc")
 		require.NotNil(t, r)
 		assert.Equal(t, decisionAsk, r.decision)
 	})
