@@ -142,6 +142,7 @@ var envAllowStaticValues = map[string]func(string) bool{
 	"JAVA_TOOL_OPTIONS": isSafeJvmOptions,
 	"MAVEN_OPTS":        isSafeJvmOptions,
 	"NODE_OPTIONS":      isSafeNodeOptions,
+	"RUSTFLAGS":         isSafeRustFlags,
 	"_JAVA_OPTIONS":     isSafeJvmOptions,
 }
 
@@ -287,6 +288,83 @@ func isDangerousJvmOption(option string) bool {
 		}
 	}
 	return false
+}
+
+func isSafeRustFlags(value string) bool {
+	tokens := strings.Fields(value)
+	for i := 0; i < len(tokens); i++ {
+		token := tokens[i]
+		switch {
+		case isRustLintFlagWithValue(token):
+			continue
+		case isRustSplitLintFlag(token):
+			if i+1 >= len(tokens) || strings.HasPrefix(tokens[i+1], "-") {
+				return false
+			}
+			i++
+		case token == "--cfg":
+			if i+1 >= len(tokens) || strings.HasPrefix(tokens[i+1], "-") {
+				return false
+			}
+			i++
+		case strings.HasPrefix(token, "--cfg="):
+			continue
+		case token == "-C":
+			if i+1 >= len(tokens) || !isSafeRustCodegenOption(tokens[i+1]) {
+				return false
+			}
+			i++
+		case strings.HasPrefix(token, "-C"):
+			if !isSafeRustCodegenOption(strings.TrimPrefix(token, "-C")) {
+				return false
+			}
+		case strings.HasPrefix(token, "--remap-path-prefix="):
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func isRustSplitLintFlag(token string) bool {
+	return token == "-A" || token == "-W" || token == "-D" || token == "-F"
+}
+
+func isRustLintFlagWithValue(token string) bool {
+	if len(token) <= 2 {
+		return false
+	}
+	prefix := token[:2]
+	return prefix == "-A" || prefix == "-W" || prefix == "-D" || prefix == "-F"
+}
+
+func isSafeRustCodegenOption(option string) bool {
+	key := option
+	if before, _, ok := strings.Cut(option, "="); ok {
+		key = before
+	}
+	switch key {
+	case "codegen-units",
+		"debuginfo",
+		"debug-assertions",
+		"embed-bitcode",
+		"extra-filename",
+		"incremental",
+		"lto",
+		"metadata",
+		"opt-level",
+		"overflow-checks",
+		"panic",
+		"prefer-dynamic",
+		"relocation-model",
+		"strip",
+		"target-cpu",
+		"target-feature":
+		return true
+	default:
+		return false
+	}
 }
 
 // validateStandaloneAssignments is the lenient counterpart used by

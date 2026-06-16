@@ -123,6 +123,9 @@ func TestEnvAllowStaticValues(t *testing.T) {
 		{"NODE_OPTIONS memory", "NODE_OPTIONS", "--max-old-space-size=3072", true},
 		{"NODE_OPTIONS require", "NODE_OPTIONS", "--require ./hook.js", false},
 		{"NODE_OPTIONS loader", "NODE_OPTIONS", "--experimental-loader=./loader.mjs", false},
+		{"RUSTFLAGS target cpu", "RUSTFLAGS", "-Ctarget-cpu=native --cfg tokio_unstable", true},
+		{"RUSTFLAGS lint", "RUSTFLAGS", "-A warnings", true},
+		{"RUSTFLAGS linker", "RUSTFLAGS", "-Clinker=/tmp/cc", false},
 	}
 
 	for _, tt := range tests {
@@ -363,6 +366,19 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 		assert.Equal(t, decisionAsk, r.decision)
 	})
 
+	t.Run("RUSTFLAGS safe value allows", func(t *testing.T) {
+		r := evaluateAll(`RUSTFLAGS="-Ctarget-cpu=native --cfg tokio_unstable" cargo test`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "env vars+cargo", r.reason)
+	})
+
+	t.Run("RUSTFLAGS linker still asks", func(t *testing.T) {
+		r := evaluateAll(`RUSTFLAGS="-Clinker=/tmp/cc" cargo test`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
 	t.Run("FOO unknown asks", func(t *testing.T) {
 		r := evaluateAll("FOO=bar pytest")
 		require.NotNil(t, r)
@@ -518,6 +534,18 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 
 	t.Run("standalone GRADLE_OPTS dangerous value asks", func(t *testing.T) {
 		r := evaluateAll("GRADLE_OPTS=--module-path")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("standalone RUSTFLAGS safe value allows", func(t *testing.T) {
+		r := evaluateAll("RUSTFLAGS=-Ctarget-cpu=native")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("standalone RUSTFLAGS dangerous value asks", func(t *testing.T) {
+		r := evaluateAll("RUSTFLAGS=-Clinker=/tmp/cc")
 		require.NotNil(t, r)
 		assert.Equal(t, decisionAsk, r.decision)
 	})
