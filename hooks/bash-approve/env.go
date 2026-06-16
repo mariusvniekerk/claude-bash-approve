@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 
 	"mvdan.cc/sh/v3/syntax"
@@ -207,12 +208,7 @@ func validateEnvAssignments(assignments []envAssignment) *result {
 }
 
 func isSafeNodeOptions(value string) bool {
-	for _, option := range strings.Fields(value) {
-		if isDangerousNodeOption(option) {
-			return false
-		}
-	}
-	return true
+	return !slices.ContainsFunc(strings.Fields(value), isDangerousNodeOption)
 }
 
 func isDangerousNodeOption(option string) bool {
@@ -236,12 +232,7 @@ func isDangerousNodeOption(option string) bool {
 }
 
 func isSafeGoFlags(value string) bool {
-	for _, option := range strings.Fields(value) {
-		if isDangerousGoFlag(option) {
-			return false
-		}
-	}
-	return true
+	return !slices.ContainsFunc(strings.Fields(value), isDangerousGoFlag)
 }
 
 func isDangerousGoFlag(option string) bool {
@@ -258,12 +249,7 @@ func isDangerousGoFlag(option string) bool {
 }
 
 func isSafeJvmOptions(value string) bool {
-	for _, option := range strings.Fields(value) {
-		if isDangerousJvmOption(option) {
-			return false
-		}
-	}
-	return true
+	return !slices.ContainsFunc(strings.Fields(value), isDangerousJvmOption)
 }
 
 func isDangerousJvmOption(option string) bool {
