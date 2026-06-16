@@ -137,6 +137,7 @@ var envAllowExactValues = map[string]map[string]bool{
 var envAllowStaticValues = map[string]func(string) bool{
 	"GOFLAGS":           isSafeGoFlags,
 	"JAVA_OPTS":         isSafeJvmOptions,
+	"JAVA_OPTIONS":      isSafeJvmOptions,
 	"JAVA_TOOL_OPTIONS": isSafeJvmOptions,
 	"NODE_OPTIONS":      isSafeNodeOptions,
 }

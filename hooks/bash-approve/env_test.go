@@ -108,6 +108,8 @@ func TestEnvAllowStaticValues(t *testing.T) {
 		{"GOFLAGS toolexec split", "GOFLAGS", "-toolexec /tmp/wrap", false},
 		{"GOFLAGS exec equals", "GOFLAGS", "-exec=/tmp/runner", false},
 		{"GOFLAGS exec split", "GOFLAGS", "-exec /tmp/runner", false},
+		{"JAVA_OPTIONS memory", "JAVA_OPTIONS", "-Xmx2g -Duser.timezone=UTC", true},
+		{"JAVA_OPTIONS argfile", "JAVA_OPTIONS", "@/tmp/java.args", false},
 		{"JAVA_OPTS memory", "JAVA_OPTS", "-Xms512m -Xmx2g", true},
 		{"JAVA_OPTS classpath", "JAVA_OPTS", "-classpath /tmp/classes", false},
 		{"JAVA_TOOL_OPTIONS memory", "JAVA_TOOL_OPTIONS", "-Xmx2g -Dfile.encoding=UTF-8", true},
@@ -303,6 +305,19 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 		assert.Equal(t, decisionAsk, r.decision)
 	})
 
+	t.Run("JAVA_OPTIONS safe value allows", func(t *testing.T) {
+		r := evaluateAll(`JAVA_OPTIONS="-Xmx2g -Duser.timezone=UTC" go test ./...`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "env vars+go", r.reason)
+	})
+
+	t.Run("JAVA_OPTIONS argfile still asks", func(t *testing.T) {
+		r := evaluateAll(`JAVA_OPTIONS="@/tmp/java.args" go test ./...`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
 	t.Run("FOO unknown asks", func(t *testing.T) {
 		r := evaluateAll("FOO=bar pytest")
 		require.NotNil(t, r)
@@ -410,6 +425,18 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 
 	t.Run("standalone JAVA_OPTS dangerous value asks", func(t *testing.T) {
 		r := evaluateAll("JAVA_OPTS=-classpath")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("standalone JAVA_OPTIONS safe value allows", func(t *testing.T) {
+		r := evaluateAll("JAVA_OPTIONS=-Xmx2g")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("standalone JAVA_OPTIONS dangerous value asks", func(t *testing.T) {
+		r := evaluateAll("JAVA_OPTIONS=@/tmp/java.args")
 		require.NotNil(t, r)
 		assert.Equal(t, decisionAsk, r.decision)
 	})
