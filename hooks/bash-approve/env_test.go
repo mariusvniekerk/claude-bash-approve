@@ -193,6 +193,13 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 		assert.Equal(t, "env vars+bun | echo | read-only", r.reason)
 	})
 
+	t.Run("NODE_OPTIONS max old space size allows bun test in for loop", func(t *testing.T) {
+		r := evaluateAll(`for f in ../packages/ui/src/stores/activity.svelte.test.ts ../packages/ui/src/components/ActivityFeed.test.ts; do NODE_OPTIONS="--max-old-space-size=2048" bun run test "$f" > /tmp/t1.log 2>&1; echo "$f exit=$?"; grep -E 'Tests |✕|× ' /tmp/t1.log | head -6; done`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "for{env vars+bun | echo | read-only | read-only}", r.reason)
+	})
+
 	t.Run("NODE_OPTIONS require still asks", func(t *testing.T) {
 		r := evaluateAll(`NODE_OPTIONS="--require ./hook.js" bun run test`)
 		require.NotNil(t, r)
