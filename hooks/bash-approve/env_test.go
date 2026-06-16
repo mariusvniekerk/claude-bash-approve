@@ -108,6 +108,8 @@ func TestEnvAllowStaticValues(t *testing.T) {
 		{"GOFLAGS toolexec split", "GOFLAGS", "-toolexec /tmp/wrap", false},
 		{"GOFLAGS exec equals", "GOFLAGS", "-exec=/tmp/runner", false},
 		{"GOFLAGS exec split", "GOFLAGS", "-exec /tmp/runner", false},
+		{"GRADLE_OPTS memory", "GRADLE_OPTS", "-Xmx2g -Dorg.gradle.daemon=false", true},
+		{"GRADLE_OPTS module path", "GRADLE_OPTS", "--module-path /tmp/modules", false},
 		{"_JAVA_OPTIONS memory", "_JAVA_OPTIONS", "-Xmx2g", true},
 		{"_JAVA_OPTIONS OnError", "_JAVA_OPTIONS", "-XX:OnError=/tmp/hook", false},
 		{"JAVA_OPTIONS memory", "JAVA_OPTIONS", "-Xmx2g -Duser.timezone=UTC", true},
@@ -348,6 +350,19 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 		assert.Equal(t, decisionAsk, r.decision)
 	})
 
+	t.Run("GRADLE_OPTS safe value allows", func(t *testing.T) {
+		r := evaluateAll(`GRADLE_OPTS="-Xmx2g -Dorg.gradle.daemon=false" go test ./...`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "env vars+go", r.reason)
+	})
+
+	t.Run("GRADLE_OPTS module path still asks", func(t *testing.T) {
+		r := evaluateAll(`GRADLE_OPTS="--module-path /tmp/modules" go test ./...`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
 	t.Run("FOO unknown asks", func(t *testing.T) {
 		r := evaluateAll("FOO=bar pytest")
 		require.NotNil(t, r)
@@ -491,6 +506,18 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 
 	t.Run("standalone MAVEN_OPTS dangerous value asks", func(t *testing.T) {
 		r := evaluateAll("MAVEN_OPTS=-agentlib:jdwp")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("standalone GRADLE_OPTS safe value allows", func(t *testing.T) {
+		r := evaluateAll("GRADLE_OPTS=-Xmx2g")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("standalone GRADLE_OPTS dangerous value asks", func(t *testing.T) {
+		r := evaluateAll("GRADLE_OPTS=--module-path")
 		require.NotNil(t, r)
 		assert.Equal(t, decisionAsk, r.decision)
 	})
