@@ -30,16 +30,6 @@ func envAssignmentsFromSyntax(assigns []*syntax.Assign) []envAssignment {
 	return out
 }
 
-func assignNames(assigns []*syntax.Assign) []string {
-	names := make([]string, 0, len(assigns))
-	for _, assign := range assigns {
-		if assign.Name != nil {
-			names = append(names, assign.Name.Value)
-		}
-	}
-	return names
-}
-
 // envHardDeny lists env-var names that should never auto-execute. These are
 // known library-injection / shell-init / process-impersonation vectors.
 var envHardDeny = map[string]bool{
@@ -172,6 +162,12 @@ func validateEnvAssignments(assignments []envAssignment) *result {
 		if allowedValues, ok := envAllowExactValues[name]; ok && assignment.staticValue && allowedValues[assignment.value] {
 			continue
 		}
+		if name == "NODE_OPTIONS" {
+			if assignment.staticValue && isSafeNodeOptions(assignment.value) {
+				continue
+			}
+			return &result{decision: decisionAsk}
+		}
 		if envAskExact[name] {
 			return &result{decision: decisionAsk}
 		}
@@ -196,23 +192,59 @@ func validateEnvAssignments(assignments []envAssignment) *result {
 	return nil
 }
 
-// validateStandaloneAssignNames is the lenient counterpart used by
+func isSafeNodeOptions(value string) bool {
+	for _, option := range strings.Fields(value) {
+		if isDangerousNodeOption(option) {
+			return false
+		}
+	}
+	return true
+}
+
+func isDangerousNodeOption(option string) bool {
+	dangerousLong := []string{
+		"--env-file",
+		"--env-file-if-exists",
+		"--eval",
+		"--experimental-loader",
+		"--import",
+		"--inspect",
+		"--inspect-brk",
+		"--loader",
+		"--require",
+	}
+	for _, flag := range dangerousLong {
+		if option == flag || strings.HasPrefix(option, flag+"=") {
+			return true
+		}
+	}
+	return option == "-e" || option == "-r" || strings.HasPrefix(option, "-e=") || strings.HasPrefix(option, "-r=")
+}
+
+// validateStandaloneAssignments is the lenient counterpart used by
 // standalone assignments (`FOO=bar` with no command on the same line).
 // Hard-deny / ask-exact / LD_*/DYLD_* still flag dangerous names, but
 // unknown names auto-approve — bash convention treats lowercase locals
 // like `hm_src=...` and most uppercase project-specific knobs as benign,
 // and the strict allowlist would otherwise prompt on every one of them.
 // Names that don't match any of the dangerous lists return nil.
-func validateStandaloneAssignNames(names []string) *result {
-	for _, name := range names {
-		if envHardDeny[name] {
+func validateStandaloneAssignments(assignments []envAssignment) *result {
+	for _, assignment := range assignments {
+		if envHardDeny[assignment.name] {
 			return &result{
 				decision:   decisionDeny,
-				denyReason: "BLOCKED: env var " + name + " can subvert command execution. Use a safer alternative.",
+				denyReason: "BLOCKED: env var " + assignment.name + " can subvert command execution. Use a safer alternative.",
 			}
 		}
 	}
-	for _, name := range names {
+	for _, assignment := range assignments {
+		name := assignment.name
+		if name == "NODE_OPTIONS" {
+			if assignment.staticValue && isSafeNodeOptions(assignment.value) {
+				continue
+			}
+			return &result{decision: decisionAsk}
+		}
 		if envAskExact[name] {
 			return &result{decision: decisionAsk}
 		}

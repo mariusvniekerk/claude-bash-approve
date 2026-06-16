@@ -186,6 +186,31 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 		assert.Equal(t, decisionAsk, r.decision)
 	})
 
+	t.Run("NODE_OPTIONS max old space size allows bun test", func(t *testing.T) {
+		r := evaluateAll(`NODE_OPTIONS="--max-old-space-size=3072" bun run test > /tmp/fulltest.log 2>&1; echo "exit=$?"; tail -8 /tmp/fulltest.log`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "env vars+bun | echo | read-only", r.reason)
+	})
+
+	t.Run("NODE_OPTIONS require still asks", func(t *testing.T) {
+		r := evaluateAll(`NODE_OPTIONS="--require ./hook.js" bun run test`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("NODE_OPTIONS experimental loader still asks", func(t *testing.T) {
+		r := evaluateAll(`NODE_OPTIONS="--experimental-loader ./loader.mjs" bun run test`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("NODE_OPTIONS inspect brk still asks", func(t *testing.T) {
+		r := evaluateAll(`NODE_OPTIONS="--inspect-brk=0.0.0.0:9229" bun run test`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
 	t.Run("FOO unknown asks", func(t *testing.T) {
 		r := evaluateAll("FOO=bar pytest")
 		require.NotNil(t, r)
@@ -245,6 +270,18 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 
 	t.Run("standalone PATH still asks", func(t *testing.T) {
 		r := evaluateAll("PATH=/tmp:$PATH")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("standalone NODE_OPTIONS safe value allows", func(t *testing.T) {
+		r := evaluateAll("NODE_OPTIONS=--max-old-space-size=3072")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("standalone NODE_OPTIONS dangerous value asks", func(t *testing.T) {
+		r := evaluateAll("NODE_OPTIONS=--require=./hook.js")
 		require.NotNil(t, r)
 		assert.Equal(t, decisionAsk, r.decision)
 	})

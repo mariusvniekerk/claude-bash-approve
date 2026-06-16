@@ -647,7 +647,7 @@ func evaluateCallExpr(call *syntax.CallExpr, ctx evalContext, wrapperPats, comma
 			return r
 		}
 		out := approved("var assignment")
-		if r := validateStandaloneAssignNames(assignNames(call.Assigns)); r != nil {
+		if r := validateStandaloneAssignments(envAssignmentsFromSyntax(call.Assigns)); r != nil {
 			out.decision = r.decision
 			out.denyReason = r.denyReason
 		}
