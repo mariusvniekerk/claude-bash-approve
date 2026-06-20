@@ -45,6 +45,17 @@ var xargsSafeAppendCommands = map[string]bool{
 	"basename": true, "dirname": true, "realpath": true, "readlink": true,
 }
 
+func splitXargsAttachedShortValue(lit string) (flag, value string, ok bool) {
+	if len(lit) <= 2 || !strings.HasPrefix(lit, "-") || strings.HasPrefix(lit, "--") {
+		return "", "", false
+	}
+	flag = lit[:2]
+	if !xargsValueFlags[flag] {
+		return "", "", false
+	}
+	return flag, lit[2:], true
+}
+
 // isXargsSafe validates an xargs invocation by extracting the command
 // that xargs will run and evaluating it through the normal pipeline.
 // args includes the command name at args[0].
@@ -54,6 +65,7 @@ func isXargsSafe(args []*syntax.Word, ctx evalContext) bool {
 	}
 
 	replacementToken := ""
+	inputFromArgFile := false
 	i := 1
 	for i < len(args) {
 		lit := wordLiteral(args[i])
@@ -66,6 +78,9 @@ func isXargsSafe(args []*syntax.Word, ctx evalContext) bool {
 			if k, v, ok := strings.Cut(lit, "="); ok {
 				if !xargsValueFlags[k] && !xargsBoolFlags[k] {
 					break
+				}
+				if k == "--arg-file" {
+					inputFromArgFile = true
 				}
 				if k == "--replace" {
 					replacementToken = v
@@ -83,6 +98,9 @@ func isXargsSafe(args []*syntax.Word, ctx evalContext) bool {
 			continue
 		}
 		if xargsValueFlags[lit] {
+			if lit == "-a" || lit == "--arg-file" {
+				inputFromArgFile = true
+			}
 			if lit == "-I" || lit == "--replace" {
 				if i+1 < len(args) {
 					replacementToken = wordLiteral(args[i+1])
@@ -95,10 +113,15 @@ func isXargsSafe(args []*syntax.Word, ctx evalContext) bool {
 			continue
 		}
 
-		// Attached short option: `-I{}` / `-Ifoo` — xargs accepts the
-		// value glued to the flag.
-		if strings.HasPrefix(lit, "-I") && len(lit) > 2 {
-			replacementToken = lit[2:]
+		// Attached short option value: `-n1`, `-P4`, `-I{}`. xargs accepts
+		// the value glued to any short flag that consumes one.
+		if flag, value, ok := splitXargsAttachedShortValue(lit); ok {
+			if flag == "-a" {
+				inputFromArgFile = true
+			}
+			if flag == "-I" {
+				replacementToken = value
+			}
 			i++
 			continue
 		}
@@ -122,6 +145,8 @@ func isXargsSafe(args []*syntax.Word, ctx evalContext) bool {
 		return true
 	}
 
+	inputFromReadOnlyPipe := ctx.xargsInputFromReadOnlyPipe && !inputFromArgFile
+
 	// xargs replaces every occurrence of the -I/--replace token with
 	// each input record at runtime, so a literal `tee {}` template
 	// would clobber arbitrary input-controlled paths the validator
@@ -132,7 +157,7 @@ func isXargsSafe(args []*syntax.Word, ctx evalContext) bool {
 				return false
 			}
 		}
-	} else if !ctx.xargsInputFromReadOnlyPipe && !xargsSafeAppendCommands[cmdLits[0]] {
+	} else if !inputFromReadOnlyPipe && !xargsSafeAppendCommands[cmdLits[0]] {
 		// No -I/--replace: xargs appends each input record as
 		// additional positional arguments. For commands not in the
 		// safe-append list, that runtime-controlled tail can change the
@@ -142,7 +167,9 @@ func isXargsSafe(args []*syntax.Word, ctx evalContext) bool {
 	}
 
 	cmd := argsText(cmdWords)
-	r := evaluate(cmd, ctx, ctx.wrapperPats, ctx.commandPats)
+	innerCtx := ctx
+	innerCtx.xargsInputFromReadOnlyPipe = inputFromReadOnlyPipe
+	r := evaluate(cmd, innerCtx, ctx.wrapperPats, ctx.commandPats)
 	if r == nil {
 		return false
 	}

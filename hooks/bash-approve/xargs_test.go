@@ -26,8 +26,11 @@ func TestXargsSafe(t *testing.T) {
 		// xargs flags before safe commands
 		{"xargs null", "xargs -0 wc -l", "xargs"},
 		{"xargs max-args", "xargs -n 1 cat", "xargs"},
+		{"xargs compact max-args", "xargs -n1 basename", "xargs"},
 		{"xargs attached -I no template", "xargs -I{} true", "xargs"},
 		{"xargs parallel", "xargs -P 4 grep pattern", "xargs"},
+		{"xargs compact parallel", "xargs -P4 grep pattern", "xargs"},
+		{"xargs compact max-lines", "xargs -L2 cat", "xargs"},
 		{"xargs delimiter", "xargs -d '\\n' echo", "xargs"},
 		{"xargs multiple flags", "xargs -0 -n 1 -P 4 grep pattern", "xargs"},
 		{"xargs no-run-if-empty", "xargs -r cat", "xargs"},
@@ -148,6 +151,9 @@ func TestXargsReadOnlyPipelineBoundaries(t *testing.T) {
 		cmd  string
 	}{
 		{"synthetic input is not trusted", `printf 'README.md\0' | xargs -0 git add --`},
+		{"arg-file input is not pipe input", `git diff --name-only | xargs -a paths.txt git add --`},
+		{"long arg-file input is not pipe input", `git diff --name-only | xargs --arg-file=paths.txt git add --`},
+		{"compact arg-file input is not pipe input", `git diff --name-only | xargs -apaths.txt git add --`},
 		{"placeholder replacement still asks", `git diff --name-only | xargs -I {} git add {}`},
 		{"dangerous command still asks", `git diff --name-only | xargs git stash`},
 	}
