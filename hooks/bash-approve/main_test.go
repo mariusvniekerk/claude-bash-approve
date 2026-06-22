@@ -662,6 +662,13 @@ func TestForLoopStaticVarTmpRedirectAllows(t *testing.T) {
 	assert.Equal(t, "for{roborev show | echo}", r.reason)
 }
 
+func TestForLoopBasenameTmpRedirectAllows(t *testing.T) {
+	r := evaluateAll(`for f in internal/sync/engine.go internal/parser/types_test.go; do git show ":3:$f" > "/tmp/theirs_$(basename $f)" 2>/dev/null && echo "saved theirs $(basename $f) ($(wc -l < /tmp/theirs_$(basename $f)) lines)"; done`)
+	require.NotNil(t, r)
+	assert.Equal(t, decisionAllow, r.decision)
+	assert.Equal(t, "for{git read op | echo}", r.reason)
+}
+
 func TestForLoopDynamicTmpRedirectTraversalAsks(t *testing.T) {
 	r := evaluateAll(`for j in ../../etc/passwd; do roborev show --job 1 --json > /tmp/rr2_$j.json; done`)
 	require.NotNil(t, r)

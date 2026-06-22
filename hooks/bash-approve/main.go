@@ -626,7 +626,7 @@ func isSafeLoopVarLiteral(value string) bool {
 	if strings.HasPrefix(value, "-") || strings.Contains(value, "..") {
 		return false
 	}
-	return !strings.ContainsAny(value, "/\x00*?[")
+	return !strings.ContainsAny(value, "\x00*?[ \t\n\r\v\f")
 }
 
 // evaluateBinaryCmd handles &&, ||, | chains.
@@ -1071,7 +1071,7 @@ func wordDecodedLiteralWithContext(w *syntax.Word, ctx evalContext) (s string, o
 			}
 			sb.WriteString(decoded)
 		case *syntax.CmdSubst:
-			val, ok := tryEvalCmdSubst(p)
+			val, ok := tryEvalCmdSubstWithContext(p, ctx)
 			if !ok {
 				return "", false
 			}
@@ -1121,8 +1121,15 @@ func literalConfigWithContext(ctx evalContext) *expand.Config {
 		pairs = append(pairs, name+"="+value)
 	}
 	return &expand.Config{
-		Env:      expand.ListEnviron(pairs...),
-		CmdSubst: literalCfg.CmdSubst,
+		Env: expand.ListEnviron(pairs...),
+		CmdSubst: func(w io.Writer, cs *syntax.CmdSubst) error {
+			val, ok := tryEvalCmdSubstWithContext(cs, ctx)
+			if !ok {
+				return errUnhandledCmdSubst
+			}
+			_, err := w.Write([]byte(val))
+			return err
+		},
 	}
 }
 
@@ -1197,6 +1204,10 @@ func init() {
 // prefix matchers (e.g. `^rm\s+-r`), so a word boundary in the substitution
 // output is indistinguishable from a literal space at the regex level.
 func tryEvalCmdSubst(cs *syntax.CmdSubst) (string, bool) {
+	return tryEvalCmdSubstWithContext(cs, evalContext{})
+}
+
+func tryEvalCmdSubstWithContext(cs *syntax.CmdSubst, ctx evalContext) (string, bool) {
 	if cs == nil || len(cs.Stmts) != 1 {
 		return "", false
 	}
@@ -1214,7 +1225,9 @@ func tryEvalCmdSubst(cs *syntax.CmdSubst) (string, bool) {
 	}
 	switch name {
 	case "echo":
-		return evalEchoArgs(call.Args[1:])
+		return evalEchoArgsWithContext(call.Args[1:], ctx)
+	case "basename":
+		return evalBasenameArgs(call.Args[1:], ctx)
 	}
 	return "", false
 }
@@ -1227,11 +1240,15 @@ func tryEvalCmdSubst(cs *syntax.CmdSubst) (string, bool) {
 // are kept literally, with bash's echo backslash escapes decoded when -e is
 // active.
 func evalEchoArgs(args []*syntax.Word) (string, bool) {
+	return evalEchoArgsWithContext(args, evalContext{})
+}
+
+func evalEchoArgsWithContext(args []*syntax.Word, ctx evalContext) (string, bool) {
 	skipFlags := true
 	decodeEscapes := false
 	parts := make([]string, 0, len(args))
 	for _, a := range args {
-		s, ok := wordDecodedLiteral(a)
+		s, ok := wordDecodedLiteralWithContext(a, ctx)
 		if !ok {
 			return "", false
 		}
@@ -1258,6 +1275,17 @@ func evalEchoArgs(args []*syntax.Word) (string, bool) {
 		parts = append(parts, s)
 	}
 	return strings.Join(parts, " "), true
+}
+
+func evalBasenameArgs(args []*syntax.Word, ctx evalContext) (string, bool) {
+	if len(args) != 1 {
+		return "", false
+	}
+	name, ok := wordDecodedLiteralWithContext(args[0], ctx)
+	if !ok || name == "" || strings.ContainsAny(name, "\x00 \t\n\r\v\f") {
+		return "", false
+	}
+	return filepath.Base(name), true
 }
 
 // isEchoFlag reports whether s is a leading echo option (-n, -e, -E, or any
