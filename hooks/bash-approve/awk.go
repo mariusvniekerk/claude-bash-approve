@@ -59,13 +59,16 @@ func isAwkSafe(args []*syntax.Word, ctx evalContext) bool {
 		return true
 	}
 	parsed := parseArgs(args[1:], awkSpec)
-	if !parsed.allLiteral {
-		return false
-	}
 	// -f/--file (script), -i/--include (library), -l/--load (dynamic extension),
 	// and -E/--exec (alternate script) all load code we cannot inspect.
 	for _, flag := range []string{"file", "include", "load", "exec"} {
 		if _, ok := parsed.flags[flag]; ok {
+			return false
+		}
+	}
+	for _, flag := range []string{"var", "field-separator", "source"} {
+		value, ok := parsed.flags[flag]
+		if ok && value != nil && wordLiteral(value) == "" {
 			return false
 		}
 	}

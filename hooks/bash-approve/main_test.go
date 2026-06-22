@@ -943,6 +943,76 @@ func TestCmdSubst_Evaluation(t *testing.T) {
 	})
 }
 
+func TestCmdSubst_StaticStringEvaluators(t *testing.T) {
+	repo := initGitRepo(t)
+	subdir := filepath.Join(repo, "pkg")
+	require.NoError(t, os.MkdirAll(subdir, 0755))
+	target := filepath.Join(subdir, "file.txt")
+	require.NoError(t, os.WriteFile(target, []byte("x"), 0644))
+	resolvedRepo, err := filepath.EvalSymlinks(repo)
+	require.NoError(t, err)
+	resolvedTarget, err := filepath.EvalSymlinks(target)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name string
+		word string
+		ctx  evalContext
+		want string
+	}{
+		{"basename suffix", `"$(basename /tmp/archive.tar .tar)"`, evalContext{}, "archive"},
+		{"dirname", `"$(dirname /tmp/archive.tar)"`, evalContext{}, "/tmp"},
+		{"printf percent s", `"$(printf %s value)"`, evalContext{}, "value"},
+		{"printf literal separator", `"$(printf '%s/%s' dir file)"`, evalContext{}, "dir/file"},
+		{"pwd from context", `"$(pwd)"`, evalContext{cwd: subdir}, subdir},
+		{"realpath existing path", `"$(realpath ./pkg/file.txt)"`, evalContext{cwd: repo}, resolvedTarget},
+		{"readlink f existing path", `"$(readlink -f ./pkg/file.txt)"`, evalContext{cwd: repo}, resolvedTarget},
+		{"git show toplevel", `"$(git rev-parse --show-toplevel)"`, evalContext{cwd: subdir}, resolvedRepo},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := parseCallArgs(t, "echo "+tt.word)
+			got, ok := wordDecodedLiteralWithContext(args[1], tt.ctx)
+			require.True(t, ok)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestCmdSubst_StaticEvaluatorUnsafeBoundaries(t *testing.T) {
+	t.Run("printf exposes generated git reset to deny matcher", func(t *testing.T) {
+		r := evaluateAll(`git $(printf %s reset) --hard`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionDeny, r.decision)
+		assert.Contains(t, r.denyReason, "git reset --hard is banned")
+	})
+
+	t.Run("printf b escape stays opaque so find asks", func(t *testing.T) {
+		r := evaluateAll(`find . $(printf %b '\055delete')`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("printf generated delete still asks through find validator", func(t *testing.T) {
+		r := evaluateAll(`find . $(printf %s -delete)`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+}
+
+func TestCmdSubst_DirnameGoEnvGomodAllowsRepoCD(t *testing.T) {
+	repo := initGitRepo(t)
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example.com/test\n\ngo 1.22\n"), 0644))
+	subdir := filepath.Join(repo, "pkg")
+	require.NoError(t, os.MkdirAll(subdir, 0755))
+
+	r := evaluateAllInDir(`cd "$(dirname "$(go env GOMOD)")"`, subdir)
+	require.NotNil(t, r)
+	assert.Equal(t, decisionAllow, r.decision)
+	assert.Equal(t, "cd", r.reason)
+}
+
 func TestCmdSubst_RecursiveEvaluation(t *testing.T) {
 	tests := []struct {
 		name    string

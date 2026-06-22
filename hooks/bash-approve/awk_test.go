@@ -176,6 +176,20 @@ func TestEvaluate_AwkFlows(t *testing.T) {
 		assert.Equal(t, decisionAllow, r.decision)
 	})
 
+	t.Run("dynamic input file after static program stays allowed", func(t *testing.T) {
+		r := evaluateAll(`f=/tmp/input.txt; awk '/func \(e \*ErrorResponse\) Error\(\) string/,/^}/' "$f" 2>/dev/null`)
+		require.NotNil(t, r)
+		assert.Equal(t, "var assignment | awk", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("dynamic option value still asks", func(t *testing.T) {
+		r := evaluateAll(`awk -v x="$dynamic" '{print x}' file`)
+		require.NotNil(t, r)
+		assert.Equal(t, "awk", r.reason)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
 	t.Run("file redirect to repo path stays allowed", func(t *testing.T) {
 		r := evaluateAllInDir(`awk 'BEGIN{print "x" > "awk-output.txt"}'`, repo)
 		require.NotNil(t, r)

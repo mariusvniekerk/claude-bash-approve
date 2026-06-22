@@ -64,7 +64,7 @@ func isCurrentRepoWorktreeCD(args []*syntax.Word, ctx evalContext) bool {
 		return false
 	}
 
-	target := wordLiteral(args[1])
+	target := wordLiteralPathWithContext(args[1], ctx)
 	if target == "" || target == "-" {
 		return false
 	}
