@@ -570,11 +570,40 @@ func evaluateDeclClause(c *syntax.DeclClause, ctx evalContext, wrapperPats, comm
 		return r
 	}
 	out := approved("shell vars")
-	if r := validateEnvAssignments(envAssignmentsFromSyntax(c.Args)); r != nil {
+	assignments := envAssignmentsFromSyntax(c.Args)
+	var r *result
+	if declClauseExportsEnv(c) {
+		r = validateEnvAssignments(assignments)
+	} else {
+		r = validateStandaloneAssignments(assignments)
+	}
+	if r != nil {
 		out.decision = r.decision
 		out.denyReason = r.denyReason
 	}
 	return out
+}
+
+func declClauseExportsEnv(c *syntax.DeclClause) bool {
+	if c == nil || c.Variant == nil {
+		return false
+	}
+	if c.Variant.Value == "export" {
+		return true
+	}
+	for _, arg := range c.Args {
+		if arg == nil || !arg.Naked || arg.Name != nil || arg.Value == nil {
+			continue
+		}
+		lit, ok := wordDecodedLiteral(arg.Value)
+		if !ok {
+			return true
+		}
+		if strings.HasPrefix(lit, "-") && !strings.HasPrefix(lit, "--") && strings.Contains(lit[1:], "x") {
+			return true
+		}
+	}
+	return false
 }
 
 // checkForLoop validates the iteration/condition of a for loop.
@@ -1108,11 +1137,125 @@ func paramExpLiteral(p *syntax.ParamExp, ctx evalContext) (string, bool) {
 		return "", false
 	}
 	if p.Excl || p.Length || p.Width || p.Index != nil || p.Slice != nil ||
-		p.Repl != nil || p.Names != 0 || p.Exp != nil {
+		p.Repl != nil || p.Names != 0 {
 		return "", false
 	}
 	val, ok := ctx.shellVars[p.Param.Value]
-	return val, ok
+	if !ok {
+		return "", false
+	}
+	if p.Exp == nil {
+		return val, true
+	}
+	return applyParamExpansionRemoval(val, p.Exp, ctx)
+}
+
+func applyParamExpansionRemoval(value string, exp *syntax.Expansion, ctx evalContext) (string, bool) {
+	switch exp.Op {
+	case syntax.RemSmallSuffix, syntax.RemLargeSuffix, syntax.RemSmallPrefix, syntax.RemLargePrefix:
+		// supported below
+	default:
+		return "", false
+	}
+	pattern, ok := paramExpansionPatternLiteral(exp.Word, ctx)
+	if !ok {
+		return "", false
+	}
+	switch exp.Op {
+	case syntax.RemSmallPrefix:
+		return removeParamPrefix(value, pattern, false), true
+	case syntax.RemLargePrefix:
+		return removeParamPrefix(value, pattern, true), true
+	case syntax.RemSmallSuffix:
+		return removeParamSuffix(value, pattern, false), true
+	case syntax.RemLargeSuffix:
+		return removeParamSuffix(value, pattern, true), true
+	}
+	return "", false
+}
+
+func paramExpansionPatternLiteral(w *syntax.Word, ctx evalContext) (string, bool) {
+	pattern, ok := wordDecodedLiteralWithContext(w, ctx)
+	if !ok || strings.Contains(pattern, "\x00") {
+		return "", false
+	}
+	// Keep the modeled subset small: literal text plus `*` and `?`.
+	// Character classes, extglobs, and escaped glob operators stay opaque.
+	if strings.ContainsAny(pattern, "[]\\") {
+		return "", false
+	}
+	return pattern, true
+}
+
+func removeParamPrefix(value, pattern string, longest bool) string {
+	best := -1
+	for i := 0; i <= len(value); i++ {
+		if !simpleShellPatternMatch(pattern, value[:i]) {
+			continue
+		}
+		if !longest {
+			return value[i:]
+		}
+		best = i
+	}
+	if best < 0 {
+		return value
+	}
+	return value[best:]
+}
+
+func removeParamSuffix(value, pattern string, longest bool) string {
+	best := -1
+	for i := 0; i <= len(value); i++ {
+		if !simpleShellPatternMatch(pattern, value[i:]) {
+			continue
+		}
+		if longest {
+			if best < 0 || i < best {
+				best = i
+			}
+			continue
+		}
+		if i > best {
+			best = i
+		}
+	}
+	if best < 0 {
+		return value
+	}
+	return value[:best]
+}
+
+func simpleShellPatternMatch(pattern, value string) bool {
+	type state struct {
+		p int
+		v int
+	}
+	memo := make(map[state]bool)
+	var match func(pIdx, vIdx int) bool
+	match = func(pIdx, vIdx int) bool {
+		key := state{p: pIdx, v: vIdx}
+		if hit, ok := memo[key]; ok {
+			return hit
+		}
+		var ok bool
+		switch {
+		case pIdx == len(pattern):
+			ok = vIdx == len(value)
+		case pattern[pIdx] == '*':
+			ok = match(pIdx+1, vIdx)
+			for i := vIdx; !ok && i < len(value); i++ {
+				ok = match(pIdx+1, i+1)
+			}
+		case pattern[pIdx] == '?':
+			ok = vIdx < len(value) && match(pIdx+1, vIdx+1)
+		default:
+			ok = vIdx < len(value) && pattern[pIdx] == value[vIdx] && match(pIdx+1, vIdx+1)
+		}
+		memo[key] = ok
+		return ok
+	}
+	return match(0, 0)
 }
 
 func literalConfigWithContextMode(ctx evalContext, mode staticSubstMode) *expand.Config {
