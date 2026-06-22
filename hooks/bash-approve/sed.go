@@ -49,6 +49,13 @@ func isSedSafe(args []*syntax.Word, ctx evalContext) bool {
 	// In-place edit. Determine which positionals are file paths:
 	// without -e/-f the first positional is the script.
 	files := parsed.positional
+	if hasShortI && len(files) > 0 {
+		if suffix, ok := wordDecodedLiteralWithContext(files[0], ctx); ok && suffix == "" {
+			// BSD/macOS sed spells in-place without backup as `sed -i '' ...`.
+			// The empty suffix is an option value, not a target file.
+			files = files[1:]
+		}
+	}
 	_, hasExpr := parsed.flags["expression"]
 	_, hasFile := parsed.flags["file"]
 	if !hasExpr && !hasFile {
