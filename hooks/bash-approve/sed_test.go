@@ -61,9 +61,11 @@ func TestIsSedSafe(t *testing.T) {
 		// -i with an in-repo target: allowed.
 		{"in-place in-repo file", "sed -i 's/foo/bar/' in.txt", evalContext{cwd: repo}, true},
 		{"in-place in-repo file with backup", "sed -i.bak 's/foo/bar/' in.txt", evalContext{cwd: repo}, true},
+		{"in-place BSD empty backup in-repo file", "sed -i '' 's/foo/bar/' in.txt", evalContext{cwd: repo}, true},
 		{"in-place long in-repo file", "sed --in-place 's/foo/bar/' in.txt", evalContext{cwd: repo}, true},
 		{"in-place range edit in-repo", "sed -i '1004,1543d' in.txt", evalContext{cwd: repo}, true},
 		{"in-place -e in-repo", "sed -i -e 's/x/y/' in.txt", evalContext{cwd: repo}, true},
+		{"in-place BSD empty backup with -e in-repo", "sed -i '' -e 's/x/y/' in.txt", evalContext{cwd: repo}, true},
 
 		// -i targeting a file outside the repo: drops to ask.
 		{"in-place outside repo absolute", "sed -i 's/foo/bar/' /etc/hosts", evalContext{cwd: repo}, false},
@@ -134,6 +136,13 @@ func TestEvaluate_SedFlows(t *testing.T) {
 
 	t.Run("sed -i in-repo allowed", func(t *testing.T) {
 		r := evaluateAllInDir("sed -i '1004,1543d' test.py", repo)
+		require.NotNil(t, r)
+		assert.Equal(t, "sed", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("BSD sed -i empty backup in-repo allowed", func(t *testing.T) {
+		r := evaluateAllInDir("sed -i '' -e 's/x/y/g' test.py", repo)
 		require.NotNil(t, r)
 		assert.Equal(t, "sed", r.reason)
 		assert.Equal(t, decisionAllow, r.decision)
