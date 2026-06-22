@@ -95,7 +95,7 @@ func isReadOnlySedSafe(args []*syntax.Word) bool {
 			if hasProgram {
 				continue
 			}
-			if !isCmdSubstSedProgram(args[i]) {
+			if !isDynamicReadOnlySedProgram(args[i]) {
 				return false
 			}
 			hasProgram = true
@@ -174,32 +174,39 @@ func isSedProgramArgSafe(w *syntax.Word) bool {
 	if wordLiteral(w) != "" {
 		return true
 	}
-	return isCmdSubstSedProgram(w)
+	return isDynamicReadOnlySedProgram(w)
 }
 
-func isCmdSubstSedProgram(w *syntax.Word) bool {
+func isDynamicReadOnlySedProgram(w *syntax.Word) bool {
 	if w == nil {
 		return false
 	}
-	sawCmdSubst := false
+	sawDynamic := false
 	for _, part := range w.Parts {
-		if !sedProgramPartAllowsCmdSubst(part, &sawCmdSubst) {
+		if !sedProgramPartAllowsDynamic(part, &sawDynamic) {
 			return false
 		}
 	}
-	return sawCmdSubst
+	return sawDynamic
 }
 
-func sedProgramPartAllowsCmdSubst(part syntax.WordPart, sawCmdSubst *bool) bool {
+func sedProgramPartAllowsDynamic(part syntax.WordPart, sawDynamic *bool) bool {
 	switch p := part.(type) {
 	case *syntax.Lit, *syntax.SglQuoted:
 		return true
 	case *syntax.CmdSubst:
-		*sawCmdSubst = true
+		*sawDynamic = true
 		return true
+	case *syntax.ArithmExp:
+		*sawDynamic = true
+		return arithmeticExpansionHasNoCommandSubst(p)
+	case *syntax.ProcSubst:
+		return false
+	case *syntax.ParamExp:
+		return false
 	case *syntax.DblQuoted:
 		for _, inner := range p.Parts {
-			if !sedProgramPartAllowsCmdSubst(inner, sawCmdSubst) {
+			if !sedProgramPartAllowsDynamic(inner, sawDynamic) {
 				return false
 			}
 		}
@@ -207,4 +214,34 @@ func sedProgramPartAllowsCmdSubst(part syntax.WordPart, sawCmdSubst *bool) bool 
 	default:
 		return false
 	}
+}
+
+func arithmeticExpansionHasNoCommandSubst(exp *syntax.ArithmExp) bool {
+	if exp == nil || exp.X == nil {
+		return false
+	}
+	ok := true
+	syntax.Walk(exp.X, func(n syntax.Node) bool {
+		switch n.(type) {
+		case *syntax.CmdSubst, *syntax.ProcSubst:
+			ok = false
+			return false
+		case *syntax.DblQuoted:
+			for _, part := range n.(*syntax.DblQuoted).Parts {
+				if _, isCmd := part.(*syntax.CmdSubst); isCmd {
+					ok = false
+					return false
+				}
+				if _, isProc := part.(*syntax.ProcSubst); isProc {
+					ok = false
+					return false
+				}
+			}
+			if !ok {
+				return false
+			}
+		}
+		return true
+	})
+	return ok
 }
