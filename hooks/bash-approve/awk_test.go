@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -37,6 +38,7 @@ func TestIsAwkSafe(t *testing.T) {
 		{"print of comparison in parens", `awk 'BEGIN{print (1 > 0)}'`, false},
 		{"if guard with > before print", `awk 'BEGIN{if (a > b) print "x"}'`, false},
 		{"division before print redirect", `awk 'BEGIN{x=1/2; print "x" > "/tmp/out"}'`, true},
+		{"print action before regex with gt chars", `awk 'p{print NR": "$0} /^>>>>>>>/{p=0}' file`, false},
 		{"sprint identifier before > is comparison", `awk 'BEGIN{sprint = 1 > 0}'`, false},
 		{"printer identifier before > is comparison", `awk 'BEGIN{printer = 5 > 3}'`, false},
 		{"myprintf identifier before > is comparison", `awk 'BEGIN{myprintf = a > b}'`, false},
@@ -145,6 +147,8 @@ func TestIsAwkSafe(t *testing.T) {
 }
 
 func TestEvaluate_AwkFlows(t *testing.T) {
+	repo := initGitRepo(t)
+
 	t.Run("simple awk allowed", func(t *testing.T) {
 		r := evaluateAll(`awk '{print $1}' file`)
 		require.NotNil(t, r)
@@ -163,5 +167,58 @@ func TestEvaluate_AwkFlows(t *testing.T) {
 		r := evaluateAll(`awk 'BEGIN{system("git diff")}'`)
 		require.NotNil(t, r)
 		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("conflict marker region printer stays allowed", func(t *testing.T) {
+		r := evaluateAll(`awk '/^<<<<<<< /{p=1} p{print NR": "$0} /^>>>>>>>/{p=0; print "----"}' internal/sync/engine.go | head -60`)
+		require.NotNil(t, r)
+		assert.Equal(t, "awk | read-only", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("dynamic input file after static program stays allowed", func(t *testing.T) {
+		r := evaluateAll(`f=/tmp/input.txt; awk '/func \(e \*ErrorResponse\) Error\(\) string/,/^}/' "$f" 2>/dev/null`)
+		require.NotNil(t, r)
+		assert.Equal(t, "var assignment | awk", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("dynamic option value still asks", func(t *testing.T) {
+		r := evaluateAll(`awk -v x="$dynamic" '{print x}' file`)
+		require.NotNil(t, r)
+		assert.Equal(t, "awk", r.reason)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("file redirect to repo path stays allowed", func(t *testing.T) {
+		r := evaluateAllInDir(`awk 'BEGIN{print "x" > "awk-output.txt"}'`, repo)
+		require.NotNil(t, r)
+		assert.Equal(t, "awk", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("append redirect to repo path stays allowed", func(t *testing.T) {
+		r := evaluateAllInDir(`awk 'BEGIN{print "x" >> "awk-output.txt"}'`, repo)
+		require.NotNil(t, r)
+		assert.Equal(t, "awk", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("file redirect to linked worktree path stays allowed", func(t *testing.T) {
+		linkedWorktree := filepath.Join(t.TempDir(), "feature-worktree")
+		runGit(t, repo, "worktree", "add", "-b", "awk-redirect-test", linkedWorktree, "HEAD")
+		target := filepath.Join(linkedWorktree, "awk-output.txt")
+
+		r := evaluateAllInDir(`awk 'BEGIN{print "x" > "`+target+`"}'`, repo)
+		require.NotNil(t, r)
+		assert.Equal(t, "awk", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("file redirect outside repo still asks", func(t *testing.T) {
+		r := evaluateAllInDir(`awk 'BEGIN{print "x" > "/etc/passwd"}'`, repo)
+		require.NotNil(t, r)
+		assert.Equal(t, "awk", r.reason)
+		assert.Equal(t, decisionAsk, r.decision)
 	})
 }

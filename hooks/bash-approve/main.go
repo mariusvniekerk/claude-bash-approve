@@ -14,6 +14,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -21,9 +22,11 @@ import (
 	"io"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"go.yaml.in/yaml/v4"
 	"mvdan.cc/sh/v3/expand"
@@ -626,7 +629,7 @@ func isSafeLoopVarLiteral(value string) bool {
 	if strings.HasPrefix(value, "-") || strings.Contains(value, "..") {
 		return false
 	}
-	return !strings.ContainsAny(value, "/\x00*?[")
+	return !strings.ContainsAny(value, "\x00*?[ \t\n\r\v\f")
 }
 
 // evaluateBinaryCmd handles &&, ||, | chains.
@@ -856,7 +859,11 @@ func wordLiteralPathWithContext(w *syntax.Word, ctx evalContext) string {
 			return ""
 		}
 	}
-	return wordLiteralWithContext(w, ctx)
+	s, ok := wordDecodedLiteralWithContextMode(w, ctx, staticSubstPath)
+	if !ok {
+		return ""
+	}
+	return s
 }
 
 // hasUnquotedTildePrefix reports whether s starts with `~` (no
@@ -1046,6 +1053,10 @@ func wordDecodedLiteral(w *syntax.Word) (s string, ok bool) {
 }
 
 func wordDecodedLiteralWithContext(w *syntax.Word, ctx evalContext) (s string, ok bool) {
+	return wordDecodedLiteralWithContextMode(w, ctx, staticSubstExact)
+}
+
+func wordDecodedLiteralWithContextMode(w *syntax.Word, ctx evalContext, mode staticSubstMode) (s string, ok bool) {
 	if w == nil {
 		return "", true
 	}
@@ -1065,13 +1076,13 @@ func wordDecodedLiteralWithContext(w *syntax.Word, ctx evalContext) (s string, o
 				sb.WriteString(p.Value)
 			}
 		case *syntax.DblQuoted:
-			decoded, ok := dblQuotedLiteral(p, ctx)
+			decoded, ok := dblQuotedLiteral(p, ctx, mode)
 			if !ok {
 				return "", false
 			}
 			sb.WriteString(decoded)
 		case *syntax.CmdSubst:
-			val, ok := tryEvalCmdSubst(p)
+			val, ok := tryEvalCmdSubstWithContextMode(p, ctx, mode)
 			if !ok {
 				return "", false
 			}
@@ -1089,11 +1100,11 @@ func wordDecodedLiteralWithContext(w *syntax.Word, ctx evalContext) (s string, o
 	return sb.String(), true
 }
 
-func dblQuotedLiteral(p *syntax.DblQuoted, ctx evalContext) (string, bool) {
+func dblQuotedLiteral(p *syntax.DblQuoted, ctx evalContext, mode staticSubstMode) (string, bool) {
 	if !dblQuotedDecodableWithContext(p, ctx) {
 		return "", false
 	}
-	decoded, err := expand.Literal(literalConfigWithContext(ctx), &syntax.Word{Parts: []syntax.WordPart{p}})
+	decoded, err := expand.Literal(literalConfigWithContextMode(ctx, mode), &syntax.Word{Parts: []syntax.WordPart{p}})
 	if err != nil {
 		return "", false
 	}
@@ -1112,8 +1123,8 @@ func paramExpLiteral(p *syntax.ParamExp, ctx evalContext) (string, bool) {
 	return val, ok
 }
 
-func literalConfigWithContext(ctx evalContext) *expand.Config {
-	if len(ctx.shellVars) == 0 {
+func literalConfigWithContextMode(ctx evalContext, mode staticSubstMode) *expand.Config {
+	if !ctxHasStaticSubstState(ctx) && mode == staticSubstExact {
 		return literalCfg
 	}
 	pairs := make([]string, 0, len(ctx.shellVars))
@@ -1121,9 +1132,20 @@ func literalConfigWithContext(ctx evalContext) *expand.Config {
 		pairs = append(pairs, name+"="+value)
 	}
 	return &expand.Config{
-		Env:      expand.ListEnviron(pairs...),
-		CmdSubst: literalCfg.CmdSubst,
+		Env: expand.ListEnviron(pairs...),
+		CmdSubst: func(w io.Writer, cs *syntax.CmdSubst) error {
+			val, ok := tryEvalCmdSubstWithContextMode(cs, ctx, mode)
+			if !ok {
+				return errUnhandledCmdSubst
+			}
+			_, err := w.Write([]byte(val))
+			return err
+		},
 	}
+}
+
+func ctxHasStaticSubstState(ctx evalContext) bool {
+	return len(ctx.shellVars) > 0 || ctx.cwd != ""
 }
 
 func recordStandaloneAssignments(stmt *syntax.Stmt, ctx *evalContext) {
@@ -1185,6 +1207,44 @@ func init() {
 	}
 }
 
+// staticSubstMode describes where a statically-evaluated command
+// substitution will be used. Exact mode may expose generated argv text to
+// command matchers; path mode is stricter because validators compare the
+// result against filesystem policy.
+type staticSubstMode int
+
+const (
+	staticSubstExact staticSubstMode = iota
+	staticSubstPath
+)
+
+type staticSubstEvaluator func(args []*syntax.Word, ctx evalContext, mode staticSubstMode) (string, bool)
+
+func staticSubstEvaluatorFor(name string) (staticSubstEvaluator, bool) {
+	switch name {
+	case "echo":
+		return evalEchoArgsSubst, true
+	case "basename":
+		return evalBasenameArgs, true
+	case "dirname":
+		return evalDirnameArgs, true
+	case "printf":
+		return evalPrintfArgs, true
+	case "pwd":
+		return evalPwdArgs, true
+	case "realpath":
+		return evalRealpathArgs, true
+	case "readlink":
+		return evalReadlinkArgs, true
+	case "git":
+		return evalGitArgs, true
+	case "go":
+		return evalGoArgs, true
+	default:
+		return nil, false
+	}
+}
+
 // tryEvalCmdSubst statically evaluates a command substitution that consists
 // of a single, redirect-free call to a known pure-string command. Returns
 // ("", false) for anything else (fail-closed: unknown substitutions never
@@ -1197,6 +1257,14 @@ func init() {
 // prefix matchers (e.g. `^rm\s+-r`), so a word boundary in the substitution
 // output is indistinguishable from a literal space at the regex level.
 func tryEvalCmdSubst(cs *syntax.CmdSubst) (string, bool) {
+	return tryEvalCmdSubstWithContext(cs, evalContext{})
+}
+
+func tryEvalCmdSubstWithContext(cs *syntax.CmdSubst, ctx evalContext) (string, bool) {
+	return tryEvalCmdSubstWithContextMode(cs, ctx, staticSubstExact)
+}
+
+func tryEvalCmdSubstWithContextMode(cs *syntax.CmdSubst, ctx evalContext, mode staticSubstMode) (string, bool) {
 	if cs == nil || len(cs.Stmts) != 1 {
 		return "", false
 	}
@@ -1212,26 +1280,34 @@ func tryEvalCmdSubst(cs *syntax.CmdSubst) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	switch name {
-	case "echo":
-		return evalEchoArgs(call.Args[1:])
+	eval, ok := staticSubstEvaluatorFor(name)
+	if !ok {
+		return "", false
 	}
-	return "", false
+	out, ok := eval(call.Args[1:], ctx, mode)
+	if !ok || !staticSubstOutputAllowed(out, mode) {
+		return "", false
+	}
+	return out, true
 }
 
-// evalEchoArgs returns echo's stdout as bash would emit it, trimmed of the
-// trailing newline that command substitution would strip anyway. Leading
+func evalEchoArgsSubst(args []*syntax.Word, ctx evalContext, mode staticSubstMode) (string, bool) {
+	return evalEchoArgsWithContext(args, ctx)
+}
+
+// evalEchoArgsWithContext returns echo's stdout as bash would emit it, trimmed
+// of the trailing newline that command substitution would strip anyway. Leading
 // flag-only args matching -[neE]+ are consumed; -e enables backslash escape
 // interpretation, -E disables it (default), with the latest setting winning.
 // Once a non-flag arg appears, remaining args (including dash-prefixed ones)
 // are kept literally, with bash's echo backslash escapes decoded when -e is
 // active.
-func evalEchoArgs(args []*syntax.Word) (string, bool) {
+func evalEchoArgsWithContext(args []*syntax.Word, ctx evalContext) (string, bool) {
 	skipFlags := true
 	decodeEscapes := false
 	parts := make([]string, 0, len(args))
 	for _, a := range args {
-		s, ok := wordDecodedLiteral(a)
+		s, ok := wordDecodedLiteralWithContext(a, ctx)
 		if !ok {
 			return "", false
 		}
@@ -1258,6 +1334,227 @@ func evalEchoArgs(args []*syntax.Word) (string, bool) {
 		parts = append(parts, s)
 	}
 	return strings.Join(parts, " "), true
+}
+
+func evalBasenameArgs(args []*syntax.Word, ctx evalContext, mode staticSubstMode) (string, bool) {
+	if len(args) != 1 && len(args) != 2 {
+		return "", false
+	}
+	name, ok := staticSubstArg(args[0], ctx, mode)
+	if !ok || !safeStaticPathInput(name) || strings.HasPrefix(name, "-") {
+		return "", false
+	}
+	base := filepath.Base(name)
+	if len(args) == 2 {
+		suffix, ok := staticSubstArg(args[1], ctx, mode)
+		if !ok || strings.ContainsAny(suffix, "\x00 \t\n\r\v\f") {
+			return "", false
+		}
+		base = strings.TrimSuffix(base, suffix)
+	}
+	return base, true
+}
+
+func evalDirnameArgs(args []*syntax.Word, ctx evalContext, mode staticSubstMode) (string, bool) {
+	if len(args) != 1 {
+		return "", false
+	}
+	name, ok := staticSubstArg(args[0], ctx, mode)
+	if !ok || !safeStaticPathInput(name) || strings.HasPrefix(name, "-") {
+		return "", false
+	}
+	return filepath.Dir(name), true
+}
+
+func evalPwdArgs(args []*syntax.Word, ctx evalContext, mode staticSubstMode) (string, bool) {
+	if len(args) > 1 || ctx.cwd == "" {
+		return "", false
+	}
+	if len(args) == 1 {
+		arg, ok := staticSubstArg(args[0], ctx, mode)
+		if !ok || arg != "-P" {
+			return "", false
+		}
+	}
+	cwd, err := filepath.Abs(ctx.cwd)
+	if err != nil {
+		return "", false
+	}
+	return filepath.Clean(cwd), true
+}
+
+func evalRealpathArgs(args []*syntax.Word, ctx evalContext, mode staticSubstMode) (string, bool) {
+	if len(args) != 1 || ctx.cwd == "" {
+		return "", false
+	}
+	target, ok := staticSubstArg(args[0], ctx, mode)
+	if !ok || !safeStaticPathInput(target) || strings.HasPrefix(target, "-") {
+		return "", false
+	}
+	resolved, err := resolvePathFromCwd(ctx.cwd, target)
+	if err != nil {
+		return "", false
+	}
+	return resolved, true
+}
+
+func evalReadlinkArgs(args []*syntax.Word, ctx evalContext, mode staticSubstMode) (string, bool) {
+	if len(args) != 2 || ctx.cwd == "" {
+		return "", false
+	}
+	flag, ok := staticSubstArg(args[0], ctx, mode)
+	if !ok || flag != "-f" {
+		return "", false
+	}
+	target, ok := staticSubstArg(args[1], ctx, mode)
+	if !ok || !safeStaticPathInput(target) || strings.HasPrefix(target, "-") {
+		return "", false
+	}
+	resolved, err := resolvePathFromCwd(ctx.cwd, target)
+	if err != nil {
+		return "", false
+	}
+	return resolved, true
+}
+
+func evalGitArgs(args []*syntax.Word, ctx evalContext, mode staticSubstMode) (string, bool) {
+	if len(args) != 2 || ctx.cwd == "" {
+		return "", false
+	}
+	subcmd, ok := staticSubstArg(args[0], ctx, mode)
+	if !ok || subcmd != "rev-parse" {
+		return "", false
+	}
+	flag, ok := staticSubstArg(args[1], ctx, mode)
+	if !ok || flag != "--show-toplevel" {
+		return "", false
+	}
+	root := repoRootForCwd(ctx.cwd)
+	if root == "" {
+		return "", false
+	}
+	return root, true
+}
+
+var staticGoEnvPathVars = map[string]bool{
+	"GOCACHE":    true,
+	"GOMOD":      true,
+	"GOMODCACHE": true,
+	"GOPATH":     true,
+	"GOROOT":     true,
+}
+
+func evalGoArgs(args []*syntax.Word, ctx evalContext, mode staticSubstMode) (string, bool) {
+	if len(args) != 2 || ctx.cwd == "" {
+		return "", false
+	}
+	subcmd, ok := staticSubstArg(args[0], ctx, mode)
+	if !ok || subcmd != "env" {
+		return "", false
+	}
+	name, ok := staticSubstArg(args[1], ctx, mode)
+	if !ok || !staticGoEnvPathVars[name] {
+		return "", false
+	}
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(timeoutCtx, "go", "env", name)
+	cmd.Dir = ctx.cwd
+	out, err := cmd.Output()
+	if err != nil || timeoutCtx.Err() != nil {
+		return "", false
+	}
+	value := strings.TrimRight(string(out), "\r\n")
+	if value == "" || strings.ContainsAny(value, "\x00\r\n") {
+		return "", false
+	}
+	return value, true
+}
+
+func evalPrintfArgs(args []*syntax.Word, ctx evalContext, mode staticSubstMode) (string, bool) {
+	if len(args) == 0 {
+		return "", false
+	}
+	format, ok := staticSubstArg(args[0], ctx, mode)
+	if !ok {
+		return "", false
+	}
+	values := make([]string, 0, len(args)-1)
+	for _, arg := range args[1:] {
+		value, ok := staticSubstArg(arg, ctx, mode)
+		if !ok {
+			return "", false
+		}
+		values = append(values, value)
+	}
+	out, ok := renderStaticPrintf(format, values)
+	if !ok {
+		return "", false
+	}
+	return strings.TrimRight(out, "\n"), true
+}
+
+func staticSubstArg(w *syntax.Word, ctx evalContext, mode staticSubstMode) (string, bool) {
+	return wordDecodedLiteralWithContextMode(w, ctx, mode)
+}
+
+func safeStaticPathInput(s string) bool {
+	return s != "" && !strings.ContainsAny(s, "\x00 \t\n\r\v\f")
+}
+
+func staticSubstOutputAllowed(out string, mode staticSubstMode) bool {
+	if strings.Contains(out, "\x00") {
+		return false
+	}
+	if mode != staticSubstPath {
+		return true
+	}
+	return out != "" && !strings.ContainsAny(out, "\x00*?[ \t\n\r\v\f")
+}
+
+func renderStaticPrintf(format string, values []string) (string, bool) {
+	var sb strings.Builder
+	arg := 0
+	for i := 0; i < len(format); i++ {
+		switch format[i] {
+		case '%':
+			if i+1 >= len(format) {
+				return "", false
+			}
+			i++
+			switch format[i] {
+			case '%':
+				sb.WriteByte('%')
+			case 's':
+				if arg >= len(values) {
+					return "", false
+				}
+				sb.WriteString(values[arg])
+				arg++
+			default:
+				return "", false
+			}
+		case '\\':
+			if i+1 >= len(format) {
+				return "", false
+			}
+			i++
+			switch format[i] {
+			case '\\':
+				sb.WriteByte('\\')
+			case 'n':
+				sb.WriteByte('\n')
+			default:
+				return "", false
+			}
+		default:
+			sb.WriteByte(format[i])
+		}
+	}
+	if arg != len(values) {
+		return "", false
+	}
+	return sb.String(), true
 }
 
 // isEchoFlag reports whether s is a leading echo option (-n, -e, -E, or any

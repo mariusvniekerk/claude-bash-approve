@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -57,13 +59,16 @@ func isAwkSafe(args []*syntax.Word, ctx evalContext) bool {
 		return true
 	}
 	parsed := parseArgs(args[1:], awkSpec)
-	if !parsed.allLiteral {
-		return false
-	}
 	// -f/--file (script), -i/--include (library), -l/--load (dynamic extension),
 	// and -E/--exec (alternate script) all load code we cannot inspect.
 	for _, flag := range []string{"file", "include", "load", "exec"} {
 		if _, ok := parsed.flags[flag]; ok {
+			return false
+		}
+	}
+	for _, flag := range []string{"var", "field-separator", "source"} {
+		value, ok := parsed.flags[flag]
+		if ok && value != nil && wordLiteral(value) == "" {
 			return false
 		}
 	}
@@ -101,6 +106,7 @@ func isAwkSafe(args []*syntax.Word, ctx evalContext) bool {
 //   - `-e PROG` and `--source PROG` (next argv)
 //   - `-e=PROG` and `--source=PROG` (=-joined)
 //   - `-ePROG` (attached short option)
+//
 // The second return value is false when a source value is non-literal —
 // the caller should ask in that case.
 func collectAwkSources(args []*syntax.Word) ([]string, bool) {
@@ -216,7 +222,7 @@ func scanAwkProgram(program string, ctx evalContext) bool {
 	if awkSourceLoadRegex.MatchString(stripped) {
 		return false
 	}
-	if hasPrintRedirect(stripped) {
+	if hasUnsafePrintRedirect(stripped, ctx) {
 		return false
 	}
 	if hasGetlinePipe(stripped) {
@@ -302,9 +308,10 @@ func isAwkSpace(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 
-// hasPrintRedirect returns true when the program contains `print` or `printf`
-// followed by a `>` or `|` operator that is the redirect form (target is a
-// filename or pipe command), not a comparison or string content.
+// hasUnsafePrintRedirect returns true when the program contains `print` or
+// `printf` followed by a redirect that the hook should ask about. Literal file
+// targets inside the current repo family are allowed; pipe targets, dynamic
+// targets, and file targets outside the repo family ask.
 //
 // Filters in priority order:
 //   - characters inside `"..."` (awk's only string delimiter);
@@ -329,7 +336,7 @@ func isAwkSpace(c byte) bool {
 // awk evaluates any expression after a top-level `>` / `|` as a filename or
 // shell command, so `print x > f` (variable target) and `print x > ("f" n)`
 // (expression target) must ask just like `print x > "/etc/passwd"`.
-func hasPrintRedirect(program string) bool {
+func hasUnsafePrintRedirect(program string, ctx evalContext) bool {
 	if !strings.Contains(program, "print") {
 		return false
 	}
@@ -382,19 +389,105 @@ func hasPrintRedirect(program string) bool {
 		if !hasPrintBefore(program, i) {
 			continue
 		}
-		return true
+		if c == '|' {
+			return true
+		}
+		target, end, ok := parseAwkFileRedirectTarget(program, i)
+		if !ok || !awkRedirectTargetInRepoFamily(ctx.cwd, target) {
+			return true
+		}
+		i = end - 1
 	}
 	return false
 }
 
+func parseAwkFileRedirectTarget(program string, opPos int) (target string, end int, ok bool) {
+	i := opPos + 1
+	if i < len(program) && program[i] == '>' {
+		i++
+	}
+	for i < len(program) && isAwkSpace(program[i]) {
+		i++
+	}
+	if i >= len(program) || program[i] != '"' {
+		return "", i, false
+	}
+	target, i, ok = parseAwkStringLiteral(program, i)
+	if !ok {
+		return "", i, false
+	}
+	for i < len(program) && isAwkSpace(program[i]) {
+		i++
+	}
+	if i < len(program) && program[i] != ';' && program[i] != '\n' && program[i] != '}' {
+		return "", i, false
+	}
+	return target, i, true
+}
+
+func parseAwkStringLiteral(program string, start int) (string, int, bool) {
+	if start >= len(program) || program[start] != '"' {
+		return "", start, false
+	}
+	i := start + 1
+	var b strings.Builder
+	for i < len(program) {
+		c := program[i]
+		if c == '"' {
+			return b.String(), i + 1, true
+		}
+		if c == '\\' && i+1 < len(program) {
+			switch program[i+1] {
+			case '\\':
+				b.WriteByte('\\')
+			case '"':
+				b.WriteByte('"')
+			case 'n':
+				b.WriteByte('\n')
+			case 't':
+				b.WriteByte('\t')
+			case 'r':
+				b.WriteByte('\r')
+			case '/':
+				b.WriteByte('/')
+			default:
+				return "", i, false
+			}
+			i += 2
+			continue
+		}
+		b.WriteByte(c)
+		i++
+	}
+	return "", i, false
+}
+
+func awkRedirectTargetInRepoFamily(cwd, target string) bool {
+	if pathInCurrentRepoFamily(cwd, target) {
+		return true
+	}
+	abs := target
+	if !filepath.IsAbs(target) {
+		abs = filepath.Join(cwd, target)
+	}
+	if _, err := os.Lstat(abs); err == nil {
+		return false
+	}
+	parent := filepath.Dir(target)
+	if parent == target {
+		return false
+	}
+	return pathInCurrentRepoFamily(cwd, parent)
+}
+
 // hasPrintBefore reports whether `print` or `printf` appears in the program
-// text before position `pos`, within the same statement (no `;` or newline
+// text before position `pos`, within the same statement (no `;`, newline, or `}`
 // between them). Match requires identifier boundaries so `sprint` /
 // `printer` / `myprintf` do not falsely trigger.
 func hasPrintBefore(program string, pos int) bool {
 	start := 0
 	for i := pos - 1; i >= 0; i-- {
-		if program[i] == ';' || program[i] == '\n' || program[i] == '{' {
+		if program[i] == ';' || program[i] == '\n' || program[i] == '{' || program[i] == '}' {
 			start = i + 1
 			break
 		}
