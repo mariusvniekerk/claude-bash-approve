@@ -58,7 +58,7 @@ func isAwkSafe(args []*syntax.Word, ctx evalContext) bool {
 	if len(args) < 2 {
 		return true
 	}
-	parsed := parseArgs(args[1:], awkSpec)
+	parsed := parseArgsWithContext(args[1:], awkSpec, ctx)
 	// -f/--file (script), -i/--include (library), -l/--load (dynamic extension),
 	// and -E/--exec (alternate script) all load code we cannot inspect.
 	for _, flag := range []string{"file", "include", "load", "exec"} {
@@ -68,14 +68,24 @@ func isAwkSafe(args []*syntax.Word, ctx evalContext) bool {
 	}
 	for _, flag := range []string{"var", "field-separator", "source"} {
 		value, ok := parsed.flags[flag]
-		if ok && value != nil && wordLiteral(value) == "" {
+		if ok && value != nil {
+			if _, decoded := wordDecodedLiteralWithContext(value, ctx); !decoded {
+				return false
+			}
+		}
+	}
+	if !parsed.allLiteral {
+		// Dynamic flag-position words can hide -f/-i/-l/-E or source
+		// values. Positional input files after a decoded program are
+		// handled below.
+		if len(parsed.positional) == 0 {
 			return false
 		}
 	}
 	// gawk allows -e / --source repeated; parseArgs's flags map only
 	// retains the last value, so re-walk args here to collect every
 	// program text before scanning.
-	sources, ok := collectAwkSources(args[1:])
+	sources, ok := collectAwkSources(args[1:], ctx)
 	if !ok {
 		return false
 	}
@@ -84,8 +94,8 @@ func isAwkSafe(args []*syntax.Word, ctx evalContext) bool {
 		// wordLiteral already returns the bash-decoded form so a program
 		// written without quoting (e.g. `awk BEGIN\{system\(\"sh\"\)\}`)
 		// still resolves to the awk syntax bash hands the binary.
-		lit := wordLiteral(parsed.positional[0])
-		if lit == "" {
+		lit, ok := wordDecodedLiteralWithContext(parsed.positional[0], ctx)
+		if !ok || lit == "" {
 			return false
 		}
 		programs = append(programs, lit)
@@ -109,10 +119,34 @@ func isAwkSafe(args []*syntax.Word, ctx evalContext) bool {
 //
 // The second return value is false when a source value is non-literal —
 // the caller should ask in that case.
-func collectAwkSources(args []*syntax.Word) ([]string, bool) {
+func collectAwkSources(args []*syntax.Word, ctx evalContext) ([]string, bool) {
 	var sources []string
 	for i := 0; i < len(args); i++ {
 		w := args[i]
+		if lit, ok := wordDecodedLiteralWithContext(w, ctx); ok {
+			switch {
+			case strings.HasPrefix(lit, "--source="):
+				sources = append(sources, lit[len("--source="):])
+				continue
+			case strings.HasPrefix(lit, "-e=") && len(lit) >= len("-e="):
+				sources = append(sources, lit[len("-e="):])
+				continue
+			case strings.HasPrefix(lit, "-e") && len(lit) > 2:
+				sources = append(sources, lit[2:])
+				continue
+			case lit == "-e" || lit == "--source":
+				i++
+				if i >= len(args) {
+					return nil, false
+				}
+				val, ok := wordDecodedLiteralWithContext(args[i], ctx)
+				if !ok || val == "" {
+					return nil, false
+				}
+				sources = append(sources, val)
+				continue
+			}
+		}
 		// =-joined and attached forms first: detect the flag via the
 		// leading literal prefix (which spans concatenated Lit /
 		// quoted-Lit parts) so split-literal forms like
