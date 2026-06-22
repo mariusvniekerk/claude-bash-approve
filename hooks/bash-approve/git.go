@@ -240,11 +240,24 @@ func pathInCurrentRepoFamily(cwd, target string) bool {
 func gitOutput(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	cmd.Env = envWithoutGitVars()
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func envWithoutGitVars() []string {
+	env := make([]string, 0, len(os.Environ()))
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(key, "GIT_") {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return env
 }
 
 func gitResolvedPath(dir string, args ...string) (string, error) {
