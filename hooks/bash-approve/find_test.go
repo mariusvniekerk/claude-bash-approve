@@ -23,6 +23,8 @@ func TestFindSafe(t *testing.T) {
 		{"find with regex", "find . -regex '.*\\.go$'", "find"},
 		{"find with size", "find . -size +1M -type f", "find"},
 		{"find with mtime", "find . -mtime -7 -name '*.log'", "find"},
+		{"find quoted go env start path", `find "$(go env GOCACHE)/.." -maxdepth 2 -iname '*.lock'`, "find"},
+		{"find quoted cache start paths", `find "${HOME}/.cache/golangci-lint" "${TMPDIR:-/tmp}" "$(go env GOCACHE)/../golangci-lint" -maxdepth 3 -type f`, "find"},
 
 		// -exec with safe commands runs them per match. The inner
 		// command is evaluated through the normal pipeline; if it
@@ -106,6 +108,8 @@ func TestFindUnsafe(t *testing.T) {
 		// Non-literal find arg can expand into a dangerous predicate
 		// at runtime (e.g. -delete via $(printf ...)).
 		{"find with non-literal arg expanding to -delete", `find . $(printf %s -delete)`},
+		{"find quoted dynamic start path without path shape", `find "$(printf %s -delete)"`},
+		{"find quoted dynamic start path after literal path without path shape", `find . "$(printf %s -delete)" -name '*.go'`},
 	}
 
 	for _, tt := range tests {
