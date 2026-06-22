@@ -183,10 +183,24 @@ func TestEvaluate_AwkFlows(t *testing.T) {
 		assert.Equal(t, decisionAllow, r.decision)
 	})
 
+	t.Run("literal loop variable in awk program stays allowed", func(t *testing.T) {
+		r := evaluateAll(`for a in Claude Codex Cowork Hermes; do echo "=== $a ==="; awk "/Type:        Agent$a,/||/Type:           Agent$a,/{f=1} f{print} /^\t\},/{if(f)exit}" internal/parser/types.go | grep -E "DiscoverFunc|Type:"; done`)
+		require.NotNil(t, r)
+		assert.Equal(t, "for{echo | awk | read-only}", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
 	t.Run("dynamic option value still asks", func(t *testing.T) {
 		r := evaluateAll(`awk -v x="$dynamic" '{print x}' file`)
 		require.NotNil(t, r)
 		assert.Equal(t, "awk", r.reason)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("static dangerous program still asks after decoding", func(t *testing.T) {
+		r := evaluateAll(`prog='BEGIN{system("rm -rf /")}'; awk "$prog" file`)
+		require.NotNil(t, r)
+		assert.Equal(t, "var assignment | awk", r.reason)
 		assert.Equal(t, decisionAsk, r.decision)
 	})
 
