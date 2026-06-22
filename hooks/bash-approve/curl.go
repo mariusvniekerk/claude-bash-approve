@@ -35,9 +35,13 @@ func parseArgsWithContext(args []*syntax.Word, spec flagSpec, ctx evalContext) p
 		allLiteral: true,
 	}
 	for i := 0; i < len(args); i++ {
-		lit := wordLiteralWithContext(args[i], ctx)
-		if lit == "" {
+		lit, ok := wordDecodedLiteralWithContext(args[i], ctx)
+		if !ok {
 			result.allLiteral = false
+			result.positional = append(result.positional, args[i])
+			continue
+		}
+		if lit == "" {
 			result.positional = append(result.positional, args[i])
 			continue
 		}

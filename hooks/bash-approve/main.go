@@ -832,14 +832,6 @@ func wordLiteral(w *syntax.Word) string {
 	return s
 }
 
-func wordLiteralWithContext(w *syntax.Word, ctx evalContext) string {
-	s, ok := wordDecodedLiteralWithContext(w, ctx)
-	if !ok {
-		return ""
-	}
-	return s
-}
-
 // wordLiteralPath is wordLiteral plus a tilde guard: bash expands a
 // leading unquoted `~` / `~user` to $HOME / a user's homedir at runtime,
 // so the validator must ask instead of comparing the literal text against
