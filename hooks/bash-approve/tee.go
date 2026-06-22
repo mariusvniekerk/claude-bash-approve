@@ -12,14 +12,14 @@ import (
 var teeBoolFlags = map[string]bool{
 	"-a": true, "--append": true,
 	"-i": true, "--ignore-interrupts": true,
-	"-p": true,
+	"-p":     true,
 	"--help": true, "--version": true,
 }
 
 // isTeeInRepo allows tee only when every positional file argument resolves
-// inside the current repo. Bare tee (no targets) drops to ask conservatively.
-// Targets may be non-existent files (tee creates them) — in that case we
-// validate via the parent directory. Returns false (→ ask via
+// inside the current repo family. Bare tee (no targets) drops to ask
+// conservatively. Targets may be non-existent files (tee creates them) — in
+// that case we validate via the parent directory. Returns false (→ ask via
 // validateFallback) for any path the validator cannot prove safe.
 func isTeeInRepo(args []*syntax.Word, ctx evalContext) bool {
 	if len(args) < 2 {
@@ -53,7 +53,7 @@ func isTeeInRepo(args []*syntax.Word, ctx evalContext) bool {
 		return false
 	}
 	for _, p := range positional {
-		if teeTargetInRepo(ctx.cwd, p) {
+		if writeTargetInRepoFamily(ctx.cwd, p) {
 			continue
 		}
 		if isSafeWriteTarget(p) {
@@ -64,16 +64,16 @@ func isTeeInRepo(args []*syntax.Word, ctx evalContext) bool {
 	return true
 }
 
-// teeTargetInRepo reports whether target (which may not exist yet) would be
-// written inside the current repo. Validates the parent directory through
-// pathInCurrentRepo so symlink resolution still applies. If the leaf itself
-// is a symlink escaping the repo, lstat catches it and we don't fall back
-// to the (always-in-repo) parent.
-func teeTargetInRepo(cwd, target string) bool {
-	if pathInCurrentRepo(cwd, target) {
+// writeTargetInRepoFamily reports whether target (which may not exist yet)
+// would be written inside the current repo or one of its linked worktrees.
+// It validates the parent directory through pathInCurrentRepoFamily so
+// symlink resolution still applies. If the leaf itself is a symlink escaping
+// the repo family, lstat catches it and we don't fall back to the parent.
+func writeTargetInRepoFamily(cwd, target string) bool {
+	if pathInCurrentRepoFamily(cwd, target) {
 		return true
 	}
-	// pathInCurrentRepo failed. Two reasons:
+	// pathInCurrentRepoFamily failed. Two reasons:
 	//   (a) the target doesn't exist yet (legitimate — tee creates files)
 	//   (b) the target IS a symlink escaping the repo (malicious)
 	// lstat distinguishes: it succeeds for (b) and fails for (a).
@@ -91,5 +91,5 @@ func teeTargetInRepo(cwd, target string) bool {
 	if parent == target {
 		return false
 	}
-	return pathInCurrentRepo(cwd, parent)
+	return pathInCurrentRepoFamily(cwd, parent)
 }

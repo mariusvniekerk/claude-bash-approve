@@ -26,6 +26,10 @@ func TestIsSedSafe(t *testing.T) {
 	repo := initGitRepo(t)
 	insideFile := filepath.Join(repo, "in.txt")
 	require.NoError(t, os.WriteFile(insideFile, []byte("hi\n"), 0644))
+	linkedWorktree := filepath.Join(t.TempDir(), "feature-worktree")
+	runGit(t, repo, "worktree", "add", "-b", "sed-worktree-test", linkedWorktree, "HEAD")
+	linkedFile := filepath.Join(linkedWorktree, "linked.txt")
+	require.NoError(t, os.WriteFile(linkedFile, []byte("hi\n"), 0644))
 
 	tests := []struct {
 		name string
@@ -66,6 +70,7 @@ func TestIsSedSafe(t *testing.T) {
 		{"in-place range edit in-repo", "sed -i '1004,1543d' in.txt", evalContext{cwd: repo}, true},
 		{"in-place -e in-repo", "sed -i -e 's/x/y/' in.txt", evalContext{cwd: repo}, true},
 		{"in-place BSD empty backup with -e in-repo", "sed -i '' -e 's/x/y/' in.txt", evalContext{cwd: repo}, true},
+		{"in-place linked worktree file", "sed -i 's/foo/bar/' " + linkedFile, evalContext{cwd: repo}, true},
 
 		// -i targeting a file outside the repo: drops to ask.
 		{"in-place outside repo absolute", "sed -i 's/foo/bar/' /etc/hosts", evalContext{cwd: repo}, false},
@@ -98,6 +103,10 @@ func TestIsSedSafe(t *testing.T) {
 func TestEvaluate_SedFlows(t *testing.T) {
 	repo := initGitRepo(t)
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "test.py"), []byte("x\n"), 0644))
+	linkedWorktree := filepath.Join(t.TempDir(), "feature-worktree")
+	runGit(t, repo, "worktree", "add", "-b", "sed-flow-worktree-test", linkedWorktree, "HEAD")
+	linkedFile := filepath.Join(linkedWorktree, "linked.py")
+	require.NoError(t, os.WriteFile(linkedFile, []byte("x\n"), 0644))
 
 	t.Run("plain sed allowed", func(t *testing.T) {
 		r := evaluateAll("sed 's/foo/bar/' file")
@@ -143,6 +152,13 @@ func TestEvaluate_SedFlows(t *testing.T) {
 
 	t.Run("BSD sed -i empty backup in-repo allowed", func(t *testing.T) {
 		r := evaluateAllInDir("sed -i '' -e 's/x/y/g' test.py", repo)
+		require.NotNil(t, r)
+		assert.Equal(t, "sed", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("sed -i linked worktree target allowed", func(t *testing.T) {
+		r := evaluateAllInDir("sed -i 's/x/y/g' "+linkedFile, repo)
 		require.NotNil(t, r)
 		assert.Equal(t, "sed", r.reason)
 		assert.Equal(t, decisionAllow, r.decision)

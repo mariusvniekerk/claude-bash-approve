@@ -72,7 +72,7 @@ func isSedSafe(args []*syntax.Word, ctx evalContext) bool {
 		if path == "" {
 			return false
 		}
-		if teeTargetInRepo(ctx.cwd, path) {
+		if writeTargetInRepoFamily(ctx.cwd, path) {
 			continue
 		}
 		if isSafeWriteTarget(path) {

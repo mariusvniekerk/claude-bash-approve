@@ -13,6 +13,8 @@ func TestIsTeeInRepo(t *testing.T) {
 	repo := initGitRepo(t)
 	insideFile := filepath.Join(repo, "build.log")
 	require.NoError(t, os.WriteFile(insideFile, []byte(""), 0644))
+	linkedWorktree := filepath.Join(t.TempDir(), "feature-worktree")
+	runGit(t, repo, "worktree", "add", "-b", "tee-worktree-test", linkedWorktree, "HEAD")
 
 	t.Run("in-repo target allowed", func(t *testing.T) {
 		args := parseCallArgs(t, "tee build.log")
@@ -21,6 +23,11 @@ func TestIsTeeInRepo(t *testing.T) {
 
 	t.Run("in-repo target with -a allowed", func(t *testing.T) {
 		args := parseCallArgs(t, "tee -a build.log")
+		assert.True(t, isTeeInRepo(args, evalContext{cwd: repo}))
+	})
+
+	t.Run("linked worktree target allowed", func(t *testing.T) {
+		args := parseCallArgs(t, "tee "+filepath.Join(linkedWorktree, "build.log"))
 		assert.True(t, isTeeInRepo(args, evalContext{cwd: repo}))
 	})
 
@@ -82,9 +89,18 @@ func TestIsTeeInRepo(t *testing.T) {
 
 func TestEvaluate_TeeFlows(t *testing.T) {
 	repo := initGitRepo(t)
+	linkedWorktree := filepath.Join(t.TempDir(), "feature-worktree")
+	runGit(t, repo, "worktree", "add", "-b", "tee-flow-worktree-test", linkedWorktree, "HEAD")
 
 	t.Run("in-repo target allowed end-to-end", func(t *testing.T) {
 		r := evaluateAllInDir("tee build.log", repo)
+		require.NotNil(t, r)
+		assert.Equal(t, "tee", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("linked worktree target allowed end-to-end", func(t *testing.T) {
+		r := evaluateAllInDir("tee "+filepath.Join(linkedWorktree, "build.log"), repo)
 		require.NotNil(t, r)
 		assert.Equal(t, "tee", r.reason)
 		assert.Equal(t, decisionAllow, r.decision)

@@ -993,7 +993,7 @@ func validateRedirect(redir *syntax.Redirect, ctx evalContext) *result {
 	if isSafeWriteTarget(target) {
 		return nil
 	}
-	if !teeTargetInRepo(ctx.cwd, target) {
+	if !writeTargetInRepoFamily(ctx.cwd, target) {
 		return &result{decision: decisionAsk}
 	}
 	return nil
