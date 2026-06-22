@@ -1123,10 +1123,6 @@ func paramExpLiteral(p *syntax.ParamExp, ctx evalContext) (string, bool) {
 	return val, ok
 }
 
-func literalConfigWithContext(ctx evalContext) *expand.Config {
-	return literalConfigWithContextMode(ctx, staticSubstExact)
-}
-
 func literalConfigWithContextMode(ctx evalContext, mode staticSubstMode) *expand.Config {
 	if !ctxHasStaticSubstState(ctx) && mode == staticSubstExact {
 		return literalCfg
@@ -1295,21 +1291,17 @@ func tryEvalCmdSubstWithContextMode(cs *syntax.CmdSubst, ctx evalContext, mode s
 	return out, true
 }
 
-// evalEchoArgs returns echo's stdout as bash would emit it, trimmed of the
-// trailing newline that command substitution would strip anyway. Leading
+func evalEchoArgsSubst(args []*syntax.Word, ctx evalContext, mode staticSubstMode) (string, bool) {
+	return evalEchoArgsWithContext(args, ctx)
+}
+
+// evalEchoArgsWithContext returns echo's stdout as bash would emit it, trimmed
+// of the trailing newline that command substitution would strip anyway. Leading
 // flag-only args matching -[neE]+ are consumed; -e enables backslash escape
 // interpretation, -E disables it (default), with the latest setting winning.
 // Once a non-flag arg appears, remaining args (including dash-prefixed ones)
 // are kept literally, with bash's echo backslash escapes decoded when -e is
 // active.
-func evalEchoArgs(args []*syntax.Word) (string, bool) {
-	return evalEchoArgsWithContext(args, evalContext{})
-}
-
-func evalEchoArgsSubst(args []*syntax.Word, ctx evalContext, mode staticSubstMode) (string, bool) {
-	return evalEchoArgsWithContext(args, ctx)
-}
-
 func evalEchoArgsWithContext(args []*syntax.Word, ctx evalContext) (string, bool) {
 	skipFlags := true
 	decodeEscapes := false
