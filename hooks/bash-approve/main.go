@@ -87,6 +87,7 @@ type evalContext struct {
 	cwd                        string
 	safeCDPrefixes             []string
 	shellVars                  map[string]string
+	sedAddressVars             map[string]bool
 	xargsHasPipelineInput      bool
 	xargsInputFromReadOnlyPipe bool
 	// wrapperPats and commandPats carry the config-filtered pattern
@@ -651,6 +652,15 @@ func contextWithStaticWordIter(ctx evalContext, loop syntax.Loop) evalContext {
 		next.shellVars = make(map[string]string, 1)
 	}
 	next.shellVars[iter.Name.Value] = representative
+	next.sedAddressVars = maps.Clone(ctx.sedAddressVars)
+	if isSedAddressLiteral(representative) {
+		if next.sedAddressVars == nil {
+			next.sedAddressVars = make(map[string]bool, 1)
+		}
+		next.sedAddressVars[iter.Name.Value] = true
+	} else if next.sedAddressVars != nil {
+		delete(next.sedAddressVars, iter.Name.Value)
+	}
 	return next
 }
 
@@ -1292,14 +1302,22 @@ func recordStandaloneAssignments(stmt *syntax.Stmt, ctx *evalContext) {
 		return
 	}
 	var updates map[string]string
+	var sedAddressUpdates map[string]bool
 	for _, assign := range call.Assigns {
 		if assign.Name == nil {
 			continue
 		}
+		name := assign.Name.Value
 		value := ""
 		if assign.Value != nil {
 			decoded, ok := wordDecodedLiteralWithContext(assign.Value, *ctx)
 			if !ok {
+				if isLineNumberPipelineAssignment(assign.Value, *ctx) {
+					if sedAddressUpdates == nil {
+						sedAddressUpdates = make(map[string]bool)
+					}
+					sedAddressUpdates[name] = true
+				}
 				continue
 			}
 			value = decoded
@@ -1307,15 +1325,31 @@ func recordStandaloneAssignments(stmt *syntax.Stmt, ctx *evalContext) {
 		if updates == nil {
 			updates = make(map[string]string)
 		}
-		updates[assign.Name.Value] = value
+		updates[name] = value
+		if sedAddressUpdates == nil {
+			sedAddressUpdates = make(map[string]bool)
+		}
+		sedAddressUpdates[name] = isSedAddressLiteral(value)
 	}
-	if len(updates) == 0 {
+	if len(updates) == 0 && len(sedAddressUpdates) == 0 {
 		return
 	}
-	if ctx.shellVars == nil {
+	if len(updates) > 0 && ctx.shellVars == nil {
 		ctx.shellVars = make(map[string]string, len(updates))
 	}
-	maps.Copy(ctx.shellVars, updates)
+	if len(updates) > 0 {
+		maps.Copy(ctx.shellVars, updates)
+	}
+	if len(sedAddressUpdates) > 0 && ctx.sedAddressVars == nil {
+		ctx.sedAddressVars = make(map[string]bool, len(sedAddressUpdates))
+	}
+	for name, ok := range sedAddressUpdates {
+		if ok {
+			ctx.sedAddressVars[name] = true
+		} else if ctx.sedAddressVars != nil {
+			delete(ctx.sedAddressVars, name)
+		}
+	}
 }
 
 // errUnhandledCmdSubst signals that a command substitution can't be evaluated

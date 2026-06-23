@@ -53,7 +53,9 @@ func TestIsSedSafe(t *testing.T) {
 		{"command substitution range program", `sed -n "$(grep -n 'func x' file | cut -d: -f1),+35p" file`, evalContext{}, true},
 		{"command substitution expression flag", `sed -n -e "$(grep -n 'func x' file | cut -d: -f1),+35p" file`, evalContext{}, true},
 		{"arithmetic expansion range program", `sed -n "$((n-8)),$((n+1))p" file`, evalContext{}, true},
+		{"tracked sed address var range program", `sed -n "$((n-8)),${n}p" file`, evalContext{sedAddressVars: map[string]bool{"n": true}}, true},
 		{"dynamic sed program", "sed -n $PROGRAM file", evalContext{}, false},
+		{"untracked sed address var asks", `sed -n "$((n-8)),${n}p" file`, evalContext{}, false},
 		{"dynamic sed flag", "sed $FLAGS '1,5p' file", evalContext{}, false},
 
 		// -i without an in-repo cwd: nothing to validate, drop to ask.
@@ -149,6 +151,41 @@ func TestEvaluate_SedFlows(t *testing.T) {
 		require.NotNil(t, r)
 		assert.Equal(t, "var assignment | sed", r.reason)
 		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("read-only sed with tracked end address allowed", func(t *testing.T) {
+		r := evaluateAll(`start=$(grep -n '^func (e \*Engine) processPositron(' internal/sync/engine.go | head -1 | cut -d: -f1); sed -n "$((start-2)),${start}p" internal/sync/engine.go`)
+		require.NotNil(t, r)
+		assert.Equal(t, "var assignment | sed", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("read-only sed with rg tracked end address allowed", func(t *testing.T) {
+		r := evaluateAll(`start=$(rg -n '^func ' internal/sync/engine.go | head -n 1 | cut --delimiter : --fields 1); sed -n "${start},$((start+2))p" internal/sync/engine.go`)
+		require.NotNil(t, r)
+		assert.Equal(t, "var assignment | sed", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("read-only sed with git grep tracked end address allowed", func(t *testing.T) {
+		r := evaluateAll(`start=$(git grep -n '^func ' -- internal/sync/engine.go | head -n1 | cut -d: -f1); sed -n "${start},$((start+1))p" internal/sync/engine.go`)
+		require.NotNil(t, r)
+		assert.Equal(t, "var assignment | sed", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("read-only sed with untracked end address asks", func(t *testing.T) {
+		r := evaluateAll(`start=$(cat internal/sync/engine.go); sed -n "$((start-2)),${start}p" internal/sync/engine.go`)
+		require.NotNil(t, r)
+		assert.Equal(t, "var assignment | sed", r.reason)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("read-only sed with multi-match line pipeline asks", func(t *testing.T) {
+		r := evaluateAll(`start=$(grep -n '^func ' internal/sync/engine.go | cut -d: -f1); sed -n "$((start-2)),${start}p" internal/sync/engine.go`)
+		require.NotNil(t, r)
+		assert.Equal(t, "var assignment | sed", r.reason)
+		assert.Equal(t, decisionAsk, r.decision)
 	})
 
 	t.Run("read-only sed with command substitution inside arithmetic denied", func(t *testing.T) {
