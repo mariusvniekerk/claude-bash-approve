@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strconv"
 	"strings"
 
 	"mvdan.cc/sh/v3/syntax"
@@ -31,7 +32,8 @@ func isLineNumberPipelineAssignment(w *syntax.Word, ctx evalContext) bool {
 	if len(calls) < 2 {
 		return false
 	}
-	if !callProducesColonPrefixedLines(calls[0], ctx) {
+	lineField, ok := lineNumberFieldForCall(calls[0], ctx)
+	if !ok {
 		return false
 	}
 	for _, call := range calls[1 : len(calls)-1] {
@@ -39,7 +41,7 @@ func isLineNumberPipelineAssignment(w *syntax.Word, ctx evalContext) bool {
 			return false
 		}
 	}
-	return isCutFirstColonFieldCall(calls[len(calls)-1], ctx)
+	return isCutColonFieldCall(calls[len(calls)-1], ctx, lineField)
 }
 
 func singleCmdSubstWord(w *syntax.Word) *syntax.CmdSubst {
@@ -82,51 +84,187 @@ func flattenPipeCalls(cmd syntax.Command) []*syntax.CallExpr {
 	}
 }
 
-func callProducesColonPrefixedLines(call *syntax.CallExpr, ctx evalContext) bool {
+func lineNumberFieldForCall(call *syntax.CallExpr, ctx evalContext) (int, bool) {
 	if len(call.Args) == 0 {
-		return false
+		return 0, false
 	}
 	name, ok := wordDecodedLiteralWithContext(call.Args[0], ctx)
 	if !ok {
-		return false
+		return 0, false
 	}
 	switch name {
-	case "grep", "rg":
-		return callArgsContainLineNumberFlag(call.Args[1:], ctx)
+	case "grep":
+		return grepLineNumberField(call.Args[1:], ctx)
+	case "rg":
+		return rgLineNumberField(call.Args[1:], ctx)
 	case "git":
 		if len(call.Args) < 3 {
-			return false
+			return 0, false
 		}
 		subcmd, ok := wordDecodedLiteralWithContext(call.Args[1], ctx)
 		if !ok || subcmd != "grep" {
-			return false
+			return 0, false
 		}
-		return callArgsContainLineNumberFlag(call.Args[2:], ctx)
+		return gitGrepLineNumberField(call.Args[2:], ctx)
 	default:
-		return false
+		return 0, false
 	}
 }
 
-func callArgsContainLineNumberFlag(args []*syntax.Word, ctx evalContext) bool {
+func grepLineNumberField(args []*syntax.Word, ctx evalContext) (int, bool) {
+	state, ok := parseLineNumberSearchArgs(args, ctx, false, "h", "cLlqZz")
+	if !ok || !state.hasLineNumber {
+		return 0, false
+	}
+	if state.noFilename {
+		return 1, true
+	}
+	if state.withFilename || state.pathCount > 1 {
+		return 2, true
+	}
+	return 1, true
+}
+
+func rgLineNumberField(args []*syntax.Word, ctx evalContext) (int, bool) {
+	state, ok := parseLineNumberSearchArgs(args, ctx, false, "I", "chlLNqz")
+	if !ok || !state.hasLineNumber {
+		return 0, false
+	}
+	if state.noFilename {
+		return 1, true
+	}
+	if state.withFilename || state.pathCount > 1 {
+		return 2, true
+	}
+	return 1, true
+}
+
+func gitGrepLineNumberField(args []*syntax.Word, ctx evalContext) (int, bool) {
+	state, ok := parseLineNumberSearchArgs(args, ctx, true, "h", "cLlqZz")
+	if !ok || !state.hasLineNumber {
+		return 0, false
+	}
+	if state.noFilename {
+		return 1, true
+	}
+	return 2, true
+}
+
+type lineNumberSearchState struct {
+	hasLineNumber bool
+	withFilename  bool
+	noFilename    bool
+	pathCount     int
+}
+
+func parseLineNumberSearchArgs(args []*syntax.Word, ctx evalContext, patternFromOptionDefault bool, shortNoFilename, shortReject string) (lineNumberSearchState, bool) {
+	lits := make([]string, 0, len(args))
 	for _, arg := range args {
 		lit, ok := wordDecodedLiteralWithContext(arg, ctx)
 		if !ok {
-			return false
+			return lineNumberSearchState{}, false
 		}
+		lits = append(lits, lit)
+	}
+
+	state := lineNumberSearchState{}
+	patternFromOption := patternFromOptionDefault
+	operands := 0
+	for i := 0; i < len(lits); i++ {
+		lit := lits[i]
 		if lit == "--" {
-			return false
+			operands += len(lits) - i - 1
+			break
 		}
-		if lit == "-n" || lit == "--line-number" {
-			return true
+		if strings.HasPrefix(lit, "--") && len(lit) > 2 {
+			ok := updateLongLineNumberSearchFlag(lit, &state, &patternFromOption)
+			if !ok {
+				return lineNumberSearchState{}, false
+			}
+			if lineNumberLongFlagConsumesNext(lit) {
+				i++
+				if i >= len(lits) {
+					return lineNumberSearchState{}, false
+				}
+			}
+			continue
 		}
-		if strings.HasPrefix(lit, "-") && !strings.HasPrefix(lit, "--") && strings.Contains(lit[1:], "n") {
-			return true
+		if strings.HasPrefix(lit, "-") && lit != "-" {
+			consumedNext, ok := updateShortLineNumberSearchFlags(lit, &state, &patternFromOption, shortNoFilename, shortReject)
+			if !ok {
+				return lineNumberSearchState{}, false
+			}
+			if consumedNext {
+				i++
+				if i >= len(lits) {
+					return lineNumberSearchState{}, false
+				}
+			}
+			continue
 		}
-		if !strings.HasPrefix(lit, "-") {
-			return false
+		operands++
+	}
+	if !patternFromOption {
+		if operands == 0 {
+			return lineNumberSearchState{}, false
+		}
+		operands--
+	}
+	state.pathCount = operands
+	return state, true
+}
+
+func updateLongLineNumberSearchFlag(lit string, state *lineNumberSearchState, patternFromOption *bool) bool {
+	name := strings.TrimPrefix(lit, "--")
+	if flag, _, ok := strings.Cut(name, "="); ok {
+		name = flag
+	}
+	switch name {
+	case "line-number":
+		state.hasLineNumber = true
+	case "recursive", "dereference-recursive", "with-filename":
+		state.withFilename = true
+	case "no-filename":
+		state.noFilename = true
+	case "regexp", "file":
+		*patternFromOption = true
+	case "count", "files-with-matches", "files-without-match", "quiet", "null", "null-data", "no-line-number", "help", "version":
+		return false
+	}
+	return true
+}
+
+func lineNumberLongFlagConsumesNext(lit string) bool {
+	name := strings.TrimPrefix(lit, "--")
+	if strings.Contains(name, "=") {
+		return false
+	}
+	return name == "regexp" || name == "file"
+}
+
+func updateShortLineNumberSearchFlags(lit string, state *lineNumberSearchState, patternFromOption *bool, shortNoFilename, shortReject string) (bool, bool) {
+	for i := 1; i < len(lit); i++ {
+		c := lit[i]
+		if strings.ContainsRune(shortReject, rune(c)) {
+			return false, false
+		}
+		if strings.ContainsRune(shortNoFilename, rune(c)) {
+			state.noFilename = true
+			continue
+		}
+		switch c {
+		case 'n':
+			state.hasLineNumber = true
+		case 'r', 'R', 'H':
+			state.withFilename = true
+		case 'e', 'f':
+			*patternFromOption = true
+			return i+1 == len(lit), true
+		case 'm', 'A', 'B', 'C':
+			return i+1 == len(lit), true
 		}
 	}
-	return false
+	return false, true
 }
 
 func isLineNumberPipelineMiddleCall(call *syntax.CallExpr, ctx evalContext) bool {
@@ -162,7 +300,7 @@ func isHeadAtMostOneCall(args []*syntax.Word, ctx evalContext) bool {
 	return false
 }
 
-func isCutFirstColonFieldCall(call *syntax.CallExpr, ctx evalContext) bool {
+func isCutColonFieldCall(call *syntax.CallExpr, ctx evalContext, field int) bool {
 	if len(call.Args) < 2 {
 		return false
 	}
@@ -190,7 +328,7 @@ func isCutFirstColonFieldCall(call *syntax.CallExpr, ctx evalContext) bool {
 				return false
 			}
 			delimOK = true
-		case "-f1", "--fields=1":
+		case "-f" + strconv.Itoa(field), "--fields=" + strconv.Itoa(field):
 			fieldOK = true
 		case "-f", "--fields":
 			i++
@@ -198,7 +336,7 @@ func isCutFirstColonFieldCall(call *syntax.CallExpr, ctx evalContext) bool {
 				return false
 			}
 			value, ok := wordDecodedLiteralWithContext(call.Args[i], ctx)
-			if !ok || value != "1" {
+			if !ok || value != strconv.Itoa(field) {
 				return false
 			}
 			fieldOK = true

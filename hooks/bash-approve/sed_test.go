@@ -168,7 +168,7 @@ func TestEvaluate_SedFlows(t *testing.T) {
 	})
 
 	t.Run("read-only sed with git grep tracked end address allowed", func(t *testing.T) {
-		r := evaluateAll(`start=$(git grep -n '^func ' -- internal/sync/engine.go | head -n1 | cut -d: -f1); sed -n "${start},$((start+1))p" internal/sync/engine.go`)
+		r := evaluateAll(`start=$(git grep -n '^func ' -- internal/sync/engine.go | head -n1 | cut -d: -f2); sed -n "${start},$((start+1))p" internal/sync/engine.go`)
 		require.NotNil(t, r)
 		assert.Equal(t, "var assignment | sed", r.reason)
 		assert.Equal(t, decisionAllow, r.decision)
@@ -179,6 +179,27 @@ func TestEvaluate_SedFlows(t *testing.T) {
 		require.NotNil(t, r)
 		assert.Equal(t, "var assignment | sed", r.reason)
 		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("read-only sed with recursive grep line-number field allowed", func(t *testing.T) {
+		r := evaluateAll(`start=$(grep -rn "func TestProcessFileProviderShadowComparePiebaldDoesNotSkipStoredFreshSource" internal/sync/ | cut -d: -f2); f=$(grep -rln "func TestProcessFileProviderShadowComparePiebaldDoesNotSkipStoredFreshSource" internal/sync/); sed -n "${start},$((start+4))p" "$f"`)
+		require.NotNil(t, r)
+		assert.Equal(t, "var assignment | var assignment | sed", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("read-only sed with recursive grep wrong field asks", func(t *testing.T) {
+		r := evaluateAll(`start=$(grep -rn "func TestProcessFileProviderShadowComparePiebaldDoesNotSkipStoredFreshSource" internal/sync/ | cut -d: -f1); sed -n "${start},$((start+4))p" file`)
+		require.NotNil(t, r)
+		assert.Equal(t, "var assignment | sed", r.reason)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("read-only sed with git grep wrong field asks", func(t *testing.T) {
+		r := evaluateAll(`start=$(git grep -n '^func ' -- internal/sync/engine.go | cut -d: -f1); sed -n "${start},$((start+1))p" internal/sync/engine.go`)
+		require.NotNil(t, r)
+		assert.Equal(t, "var assignment | sed", r.reason)
+		assert.Equal(t, decisionAsk, r.decision)
 	})
 
 	t.Run("read-only sed with untracked end address asks", func(t *testing.T) {
