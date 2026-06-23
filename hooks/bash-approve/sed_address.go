@@ -20,15 +20,7 @@ func isSedAddressLiteral(value string) bool {
 }
 
 func isLineNumberPipelineAssignment(w *syntax.Word, ctx evalContext) bool {
-	cs := singleCmdSubstWord(w)
-	if cs == nil || len(cs.Stmts) != 1 {
-		return false
-	}
-	stmt := cs.Stmts[0]
-	if stmt == nil || stmt.Cmd == nil || len(stmt.Redirs) > 0 {
-		return false
-	}
-	calls := flattenPipeCalls(stmt.Cmd)
+	calls := singleCmdSubstPipeCalls(w)
 	if len(calls) < 2 {
 		return false
 	}
@@ -42,6 +34,56 @@ func isLineNumberPipelineAssignment(w *syntax.Word, ctx evalContext) bool {
 		}
 	}
 	return isCutColonFieldCall(calls[len(calls)-1], ctx, lineField)
+}
+
+func isLineRecordPipelineAssignment(w *syntax.Word, ctx evalContext) (int, bool) {
+	calls := singleCmdSubstPipeCalls(w)
+	if len(calls) == 0 {
+		return 0, false
+	}
+	lineField, ok := lineNumberFieldForCall(calls[0], ctx)
+	if !ok {
+		return 0, false
+	}
+	for _, call := range calls[1:] {
+		if !isLineRecordPipelineMiddleCall(call, ctx) {
+			return 0, false
+		}
+	}
+	return lineField, true
+}
+
+func isLineRecordCutSedAddressAssignment(w *syntax.Word, ctx evalContext) bool {
+	calls := singleCmdSubstPipeCalls(w)
+	if len(calls) < 2 {
+		return false
+	}
+	varName, ok := lineRecordVarFromEchoCall(calls[0])
+	if !ok {
+		return false
+	}
+	lineField, ok := ctx.lineRecordVars[varName]
+	if !ok {
+		return false
+	}
+	for _, call := range calls[1 : len(calls)-1] {
+		if !isLineRecordPipelineMiddleCall(call, ctx) {
+			return false
+		}
+	}
+	return isCutColonFieldCall(calls[len(calls)-1], ctx, lineField)
+}
+
+func singleCmdSubstPipeCalls(w *syntax.Word) []*syntax.CallExpr {
+	cs := singleCmdSubstWord(w)
+	if cs == nil || len(cs.Stmts) != 1 {
+		return nil
+	}
+	stmt := cs.Stmts[0]
+	if stmt == nil || stmt.Cmd == nil || len(stmt.Redirs) > 0 {
+		return nil
+	}
+	return flattenPipeCalls(stmt.Cmd)
 }
 
 func singleCmdSubstWord(w *syntax.Word) *syntax.CmdSubst {
@@ -119,7 +161,7 @@ func grepLineNumberField(args []*syntax.Word, ctx evalContext) (int, bool) {
 	if state.noFilename {
 		return 1, true
 	}
-	if state.withFilename || state.pathCount > 1 {
+	if state.withFilename || state.pathCount > 1 || state.pathHasGlob {
 		return 2, true
 	}
 	return 1, true
@@ -133,7 +175,7 @@ func rgLineNumberField(args []*syntax.Word, ctx evalContext) (int, bool) {
 	if state.noFilename {
 		return 1, true
 	}
-	if state.withFilename || state.pathCount > 1 {
+	if state.withFilename || state.pathCount > 1 || state.pathHasGlob {
 		return 2, true
 	}
 	return 1, true
@@ -155,6 +197,7 @@ type lineNumberSearchState struct {
 	withFilename  bool
 	noFilename    bool
 	pathCount     int
+	pathHasGlob   bool
 }
 
 func parseLineNumberSearchArgs(args []*syntax.Word, ctx evalContext, patternFromOptionDefault bool, shortNoFilename, shortReject string) (lineNumberSearchState, bool) {
@@ -169,11 +212,11 @@ func parseLineNumberSearchArgs(args []*syntax.Word, ctx evalContext, patternFrom
 
 	state := lineNumberSearchState{}
 	patternFromOption := patternFromOptionDefault
-	operands := 0
+	var operands []string
 	for i := 0; i < len(lits); i++ {
 		lit := lits[i]
 		if lit == "--" {
-			operands += len(lits) - i - 1
+			operands = append(operands, lits[i+1:]...)
 			break
 		}
 		if strings.HasPrefix(lit, "--") && len(lit) > 2 {
@@ -202,15 +245,22 @@ func parseLineNumberSearchArgs(args []*syntax.Word, ctx evalContext, patternFrom
 			}
 			continue
 		}
-		operands++
+		operands = append(operands, lit)
 	}
+	paths := operands
 	if !patternFromOption {
-		if operands == 0 {
+		if len(operands) == 0 {
 			return lineNumberSearchState{}, false
 		}
-		operands--
+		paths = operands[1:]
 	}
-	state.pathCount = operands
+	state.pathCount = len(paths)
+	for _, path := range paths {
+		if strings.ContainsAny(path, "*?[") {
+			state.pathHasGlob = true
+			break
+		}
+	}
 	return state, true
 }
 
@@ -281,6 +331,79 @@ func isLineNumberPipelineMiddleCall(call *syntax.CallExpr, ctx evalContext) bool
 	return isHeadAtMostOneCall(call.Args[1:], ctx)
 }
 
+func isLineRecordPipelineMiddleCall(call *syntax.CallExpr, ctx evalContext) bool {
+	if isLineNumberPipelineMiddleCall(call, ctx) {
+		return true
+	}
+	return isLinePreservingGrepFilterCall(call, ctx)
+}
+
+func isLinePreservingGrepFilterCall(call *syntax.CallExpr, ctx evalContext) bool {
+	if len(call.Args) == 0 {
+		return false
+	}
+	name, ok := wordDecodedLiteralWithContext(call.Args[0], ctx)
+	if !ok || name != "grep" {
+		return false
+	}
+	patternOperands := 0
+	for i := 1; i < len(call.Args); i++ {
+		lit, ok := wordDecodedLiteralWithContext(call.Args[i], ctx)
+		if !ok {
+			return false
+		}
+		if lit == "--" {
+			patternOperands += len(call.Args) - i - 1
+			break
+		}
+		if strings.HasPrefix(lit, "--") && len(lit) > 2 {
+			name := strings.TrimPrefix(lit, "--")
+			if flag, _, ok := strings.Cut(name, "="); ok {
+				name = flag
+			}
+			switch name {
+			case "invert-match", "ignore-case", "extended-regexp", "fixed-strings", "perl-regexp",
+				"basic-regexp", "word-regexp", "line-regexp", "no-messages":
+				continue
+			case "regexp":
+				if !strings.Contains(lit, "=") {
+					i++
+					if i >= len(call.Args) {
+						return false
+					}
+				}
+				patternOperands++
+				continue
+			default:
+				return false
+			}
+		}
+		if strings.HasPrefix(lit, "-") && lit != "-" {
+			for j := 1; j < len(lit); j++ {
+				switch lit[j] {
+				case 'v', 'i', 'E', 'F', 'P', 'G', 'w', 'x', 's':
+					continue
+				case 'e':
+					if j+1 != len(lit) {
+						return false
+					}
+					i++
+					if i >= len(call.Args) {
+						return false
+					}
+					patternOperands++
+					continue
+				default:
+					return false
+				}
+			}
+			continue
+		}
+		patternOperands++
+	}
+	return patternOperands == 1
+}
+
 func isHeadAtMostOneCall(args []*syntax.Word, ctx evalContext) bool {
 	if len(args) == 0 {
 		return false
@@ -298,6 +421,49 @@ func isHeadAtMostOneCall(args []*syntax.Word, ctx evalContext) bool {
 		return ok && count == "1"
 	}
 	return false
+}
+
+func lineRecordVarFromEchoCall(call *syntax.CallExpr) (string, bool) {
+	if len(call.Args) != 2 {
+		return "", false
+	}
+	name, ok := wordDecodedLiteral(call.Args[0])
+	if !ok || name != "echo" {
+		return "", false
+	}
+	return plainParamWordName(call.Args[1])
+}
+
+func plainParamWordName(w *syntax.Word) (string, bool) {
+	if w == nil || len(w.Parts) != 1 {
+		return "", false
+	}
+	switch p := w.Parts[0].(type) {
+	case *syntax.ParamExp:
+		return plainParamExpName(p)
+	case *syntax.DblQuoted:
+		if len(p.Parts) != 1 {
+			return "", false
+		}
+		param, ok := p.Parts[0].(*syntax.ParamExp)
+		if !ok {
+			return "", false
+		}
+		return plainParamExpName(param)
+	default:
+		return "", false
+	}
+}
+
+func plainParamExpName(p *syntax.ParamExp) (string, bool) {
+	if p == nil || p.Param == nil {
+		return "", false
+	}
+	if p.Excl || p.Length || p.Width || p.Index != nil || p.Slice != nil ||
+		p.Repl != nil || p.Names != 0 || p.Exp != nil {
+		return "", false
+	}
+	return p.Param.Value, true
 }
 
 func isCutColonFieldCall(call *syntax.CallExpr, ctx evalContext, field int) bool {

@@ -88,6 +88,7 @@ type evalContext struct {
 	safeCDPrefixes             []string
 	shellVars                  map[string]string
 	sedAddressVars             map[string]bool
+	lineRecordVars             map[string]int
 	xargsHasPipelineInput      bool
 	xargsInputFromReadOnlyPipe bool
 	// wrapperPats and commandPats carry the config-filtered pattern
@@ -660,6 +661,10 @@ func contextWithStaticWordIter(ctx evalContext, loop syntax.Loop) evalContext {
 		next.sedAddressVars[iter.Name.Value] = true
 	} else if next.sedAddressVars != nil {
 		delete(next.sedAddressVars, iter.Name.Value)
+	}
+	next.lineRecordVars = maps.Clone(ctx.lineRecordVars)
+	if next.lineRecordVars != nil {
+		delete(next.lineRecordVars, iter.Name.Value)
 	}
 	return next
 }
@@ -1303,6 +1308,7 @@ func recordStandaloneAssignments(stmt *syntax.Stmt, ctx *evalContext) {
 	}
 	var updates map[string]string
 	var sedAddressUpdates map[string]bool
+	var lineRecordUpdates map[string]int
 	for _, assign := range call.Assigns {
 		if assign.Name == nil {
 			continue
@@ -1317,6 +1323,37 @@ func recordStandaloneAssignments(stmt *syntax.Stmt, ctx *evalContext) {
 						sedAddressUpdates = make(map[string]bool)
 					}
 					sedAddressUpdates[name] = true
+					if lineRecordUpdates == nil {
+						lineRecordUpdates = make(map[string]int)
+					}
+					lineRecordUpdates[name] = 0
+				} else if lineField, ok := isLineRecordPipelineAssignment(assign.Value, *ctx); ok {
+					if lineRecordUpdates == nil {
+						lineRecordUpdates = make(map[string]int)
+					}
+					lineRecordUpdates[name] = lineField
+					if sedAddressUpdates == nil {
+						sedAddressUpdates = make(map[string]bool)
+					}
+					sedAddressUpdates[name] = false
+				} else if isLineRecordCutSedAddressAssignment(assign.Value, *ctx) {
+					if sedAddressUpdates == nil {
+						sedAddressUpdates = make(map[string]bool)
+					}
+					sedAddressUpdates[name] = true
+					if lineRecordUpdates == nil {
+						lineRecordUpdates = make(map[string]int)
+					}
+					lineRecordUpdates[name] = 0
+				} else {
+					if sedAddressUpdates == nil {
+						sedAddressUpdates = make(map[string]bool)
+					}
+					sedAddressUpdates[name] = false
+					if lineRecordUpdates == nil {
+						lineRecordUpdates = make(map[string]int)
+					}
+					lineRecordUpdates[name] = 0
 				}
 				continue
 			}
@@ -1330,8 +1367,12 @@ func recordStandaloneAssignments(stmt *syntax.Stmt, ctx *evalContext) {
 			sedAddressUpdates = make(map[string]bool)
 		}
 		sedAddressUpdates[name] = isSedAddressLiteral(value)
+		if lineRecordUpdates == nil {
+			lineRecordUpdates = make(map[string]int)
+		}
+		lineRecordUpdates[name] = 0
 	}
-	if len(updates) == 0 && len(sedAddressUpdates) == 0 {
+	if len(updates) == 0 && len(sedAddressUpdates) == 0 && len(lineRecordUpdates) == 0 {
 		return
 	}
 	if len(updates) > 0 && ctx.shellVars == nil {
@@ -1348,6 +1389,16 @@ func recordStandaloneAssignments(stmt *syntax.Stmt, ctx *evalContext) {
 			ctx.sedAddressVars[name] = true
 		} else if ctx.sedAddressVars != nil {
 			delete(ctx.sedAddressVars, name)
+		}
+	}
+	if len(lineRecordUpdates) > 0 && ctx.lineRecordVars == nil {
+		ctx.lineRecordVars = make(map[string]int, len(lineRecordUpdates))
+	}
+	for name, field := range lineRecordUpdates {
+		if field > 0 {
+			ctx.lineRecordVars[name] = field
+		} else if ctx.lineRecordVars != nil {
+			delete(ctx.lineRecordVars, name)
 		}
 	}
 }

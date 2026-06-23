@@ -188,10 +188,31 @@ func TestEvaluate_SedFlows(t *testing.T) {
 		assert.Equal(t, decisionAllow, r.decision)
 	})
 
+	t.Run("read-only sed with extracted line-record field allowed", func(t *testing.T) {
+		r := evaluateAll(`start=$(grep -n "func CodexEffectiveMtime" internal/parser/*.go | grep -v _test | head -1); f=$(echo "$start" | cut -d: -f1); ln=$(echo "$start" | cut -d: -f2); sed -n "${ln},$((ln+38))p" "$f"`)
+		require.NotNil(t, r)
+		assert.Equal(t, "var assignment | var assignment | var assignment | sed", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
 	t.Run("read-only sed with recursive grep wrong field asks", func(t *testing.T) {
 		r := evaluateAll(`start=$(grep -rn "func TestProcessFileProviderShadowComparePiebaldDoesNotSkipStoredFreshSource" internal/sync/ | cut -d: -f1); sed -n "${start},$((start+4))p" file`)
 		require.NotNil(t, r)
 		assert.Equal(t, "var assignment | sed", r.reason)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("read-only sed with extracted wrong line-record field asks", func(t *testing.T) {
+		r := evaluateAll(`start=$(grep -n "func CodexEffectiveMtime" internal/parser/*.go | grep -v _test | head -1); ln=$(echo "$start" | cut -d: -f1); sed -n "${ln},$((ln+38))p" file`)
+		require.NotNil(t, r)
+		assert.Equal(t, "var assignment | var assignment | sed", r.reason)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("read-only sed with output-changing line-record filter asks", func(t *testing.T) {
+		r := evaluateAll(`start=$(grep -n "func CodexEffectiveMtime" internal/parser/*.go | grep -o Codex | head -1); ln=$(echo "$start" | cut -d: -f2); sed -n "${ln},$((ln+38))p" file`)
+		require.NotNil(t, r)
+		assert.Equal(t, "var assignment | var assignment | sed", r.reason)
 		assert.Equal(t, decisionAsk, r.decision)
 	})
 
