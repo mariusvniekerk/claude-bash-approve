@@ -67,7 +67,7 @@ func isAwkSafe(args []*syntax.Word, ctx evalContext) bool {
 	for _, flag := range []string{"var", "field-separator", "source"} {
 		value, ok := parsed.flags[flag]
 		if ok && value != nil {
-			if _, decoded := wordDecodedLiteralWithContext(value, ctx); !decoded {
+			if !isAwkFlagValueSafe(flag, value, ctx) {
 				return false
 			}
 		}
@@ -107,6 +107,13 @@ func isAwkSafe(args []*syntax.Word, ctx evalContext) bool {
 		}
 	}
 	return true
+}
+
+func isAwkFlagValueSafe(flag string, value *syntax.Word, ctx evalContext) bool {
+	if _, decoded := wordDecodedLiteralWithContext(value, ctx); decoded {
+		return true
+	}
+	return flag == "var" && isAwkSedAddressVarAssignment(value, ctx)
 }
 
 // collectAwkSources returns every literal value supplied with -e or

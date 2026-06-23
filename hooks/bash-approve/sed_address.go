@@ -74,6 +74,98 @@ func isLineRecordCutSedAddressAssignment(w *syntax.Word, ctx evalContext) bool {
 	return isCutColonFieldCall(calls[len(calls)-1], ctx, lineField)
 }
 
+func isAwkPrintNRLineAssignment(w *syntax.Word, ctx evalContext) bool {
+	calls := singleCmdSubstPipeCalls(w)
+	if len(calls) != 1 {
+		return false
+	}
+	call := calls[0]
+	if len(call.Args) == 0 {
+		return false
+	}
+	name, ok := wordDecodedLiteralWithContext(call.Args[0], ctx)
+	if !ok || name != "awk" {
+		return false
+	}
+	parsed := parseArgsWithContext(call.Args[1:], awkSpec, ctx)
+	for _, flag := range []string{"file", "include", "load", "exec", "source"} {
+		if _, ok := parsed.flags[flag]; ok {
+			return false
+		}
+	}
+	value, ok := parsed.flags["var"]
+	if !ok || !isAwkSedAddressVarAssignment(value, ctx) {
+		return false
+	}
+	if len(parsed.positional) < 2 {
+		return false
+	}
+	program, ok := wordDecodedLiteralWithContext(parsed.positional[0], ctx)
+	if !ok || !isAwkPrintNRProgram(program) {
+		return false
+	}
+	return scanAwkProgram(program, ctx)
+}
+
+func isAwkSedAddressVarAssignment(w *syntax.Word, ctx evalContext) bool {
+	if w == nil || ctx.sedAddressVars == nil || len(w.Parts) != 2 {
+		return false
+	}
+	prefix, ok := w.Parts[0].(*syntax.Lit)
+	if !ok {
+		return false
+	}
+	name, ok := strings.CutSuffix(stripUnquotedBackslashes(prefix.Value), "=")
+	if !ok || !isAwkVarName(name) {
+		return false
+	}
+	var paramName string
+	switch p := w.Parts[1].(type) {
+	case *syntax.ParamExp:
+		paramName, ok = plainParamExpName(p)
+	case *syntax.DblQuoted:
+		if len(p.Parts) != 1 {
+			return false
+		}
+		param, paramOK := p.Parts[0].(*syntax.ParamExp)
+		if !paramOK {
+			return false
+		}
+		paramName, ok = plainParamExpName(param)
+	default:
+		return false
+	}
+	return ok && ctx.sedAddressVars[paramName]
+}
+
+func isAwkVarName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		if r == '_' || ('A' <= r && r <= 'Z') || ('a' <= r && r <= 'z') {
+			continue
+		}
+		if i > 0 && '0' <= r && r <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func isAwkPrintNRProgram(program string) bool {
+	stripped := stripAwkComments(program)
+	compact := strings.Join(strings.Fields(stripped), " ")
+	if strings.Contains(compact, "printf") || strings.Count(compact, "print") != 1 {
+		return false
+	}
+	if !strings.Contains(compact, "print NR") && !strings.Contains(compact, "print(NR)") {
+		return false
+	}
+	return strings.Contains(compact, "exit")
+}
+
 func singleCmdSubstPipeCalls(w *syntax.Word) []*syntax.CallExpr {
 	cs := singleCmdSubstWord(w)
 	if cs == nil || len(cs.Stmts) != 1 {

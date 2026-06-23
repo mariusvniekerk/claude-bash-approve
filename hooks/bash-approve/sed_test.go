@@ -195,6 +195,20 @@ func TestEvaluate_SedFlows(t *testing.T) {
 		assert.Equal(t, decisionAllow, r.decision)
 	})
 
+	t.Run("read-only sed in conflict loop with grep and awk endpoints allowed", func(t *testing.T) {
+		r := evaluateAll(`for n in $(grep -nE '^<<<<<<< HEAD' internal/sync/engine.go | cut -d: -f1); do e=$(awk -v s=$n 'NR>s && /^>>>>>>>/{print NR; exit}' internal/sync/engine.go); echo "--- conflict $n..$e ---"; sed -n "${n},${e}p" internal/sync/engine.go; done`)
+		require.NotNil(t, r)
+		assert.Equal(t, "for{var assignment | echo | sed}", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("read-only sed with line-number loop var allowed", func(t *testing.T) {
+		r := evaluateAll(`for n in $(grep -nE '^func ' internal/sync/engine.go | cut -d: -f1); do sed -n "${n},$((n+2))p" internal/sync/engine.go; done`)
+		require.NotNil(t, r)
+		assert.Equal(t, "for{sed}", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
 	t.Run("read-only sed with recursive grep wrong field asks", func(t *testing.T) {
 		r := evaluateAll(`start=$(grep -rn "func TestProcessFileProviderShadowComparePiebaldDoesNotSkipStoredFreshSource" internal/sync/ | cut -d: -f1); sed -n "${start},$((start+4))p" file`)
 		require.NotNil(t, r)
@@ -213,6 +227,24 @@ func TestEvaluate_SedFlows(t *testing.T) {
 		r := evaluateAll(`start=$(grep -n "func CodexEffectiveMtime" internal/parser/*.go | grep -o Codex | head -1); ln=$(echo "$start" | cut -d: -f2); sed -n "${ln},$((ln+38))p" file`)
 		require.NotNil(t, r)
 		assert.Equal(t, "var assignment | var assignment | sed", r.reason)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("read-only sed with untracked loop var asks", func(t *testing.T) {
+		r := evaluateAll(`for n in $(cat internal/sync/engine.go); do sed -n "${n},$((n+2))p" internal/sync/engine.go; done`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("read-only sed with awk non-NR endpoint asks", func(t *testing.T) {
+		r := evaluateAll(`for n in $(grep -nE '^<<<<<<< HEAD' internal/sync/engine.go | cut -d: -f1); do e=$(awk -v s=$n 'NR>s {print $0; exit}' internal/sync/engine.go); sed -n "${n},${e}p" internal/sync/engine.go; done`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("read-only sed with awk untrusted seed asks", func(t *testing.T) {
+		r := evaluateAll(`n=$(cat internal/sync/engine.go); e=$(awk -v s=$n 'NR>s && /^>>>>>>>/{print NR; exit}' internal/sync/engine.go); sed -n "${n},${e}p" internal/sync/engine.go`)
+		require.NotNil(t, r)
 		assert.Equal(t, decisionAsk, r.decision)
 	})
 

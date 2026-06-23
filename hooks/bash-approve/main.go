@@ -637,6 +637,9 @@ func contextWithStaticWordIter(ctx evalContext, loop syntax.Loop) evalContext {
 	if !ok || iter.Name == nil || len(iter.Items) == 0 {
 		return ctx
 	}
+	if len(iter.Items) == 1 && isLineNumberPipelineAssignment(iter.Items[0], ctx) {
+		return contextWithSedAddressLoopVar(ctx, iter.Name.Value)
+	}
 	var representative string
 	for i, word := range iter.Items {
 		value, ok := wordDecodedLiteralWithContext(word, ctx)
@@ -665,6 +668,24 @@ func contextWithStaticWordIter(ctx evalContext, loop syntax.Loop) evalContext {
 	next.lineRecordVars = maps.Clone(ctx.lineRecordVars)
 	if next.lineRecordVars != nil {
 		delete(next.lineRecordVars, iter.Name.Value)
+	}
+	return next
+}
+
+func contextWithSedAddressLoopVar(ctx evalContext, name string) evalContext {
+	next := ctx
+	next.shellVars = maps.Clone(ctx.shellVars)
+	if next.shellVars != nil {
+		delete(next.shellVars, name)
+	}
+	next.sedAddressVars = maps.Clone(ctx.sedAddressVars)
+	if next.sedAddressVars == nil {
+		next.sedAddressVars = make(map[string]bool, 1)
+	}
+	next.sedAddressVars[name] = true
+	next.lineRecordVars = maps.Clone(ctx.lineRecordVars)
+	if next.lineRecordVars != nil {
+		delete(next.lineRecordVars, name)
 	}
 	return next
 }
@@ -1337,6 +1358,15 @@ func recordStandaloneAssignments(stmt *syntax.Stmt, ctx *evalContext) {
 					}
 					sedAddressUpdates[name] = false
 				} else if isLineRecordCutSedAddressAssignment(assign.Value, *ctx) {
+					if sedAddressUpdates == nil {
+						sedAddressUpdates = make(map[string]bool)
+					}
+					sedAddressUpdates[name] = true
+					if lineRecordUpdates == nil {
+						lineRecordUpdates = make(map[string]int)
+					}
+					lineRecordUpdates[name] = 0
+				} else if isAwkPrintNRLineAssignment(assign.Value, *ctx) {
 					if sedAddressUpdates == nil {
 						sedAddressUpdates = make(map[string]bool)
 					}
