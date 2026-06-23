@@ -28,7 +28,7 @@ func isLineNumberPipelineAssignment(w *syntax.Word, ctx evalContext) bool {
 		return false
 	}
 	calls := flattenPipeCalls(stmt.Cmd)
-	if len(calls) < 3 {
+	if len(calls) < 2 {
 		return false
 	}
 	if !callProducesColonPrefixedLines(calls[0], ctx) {

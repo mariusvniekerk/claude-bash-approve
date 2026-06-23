@@ -174,6 +174,13 @@ func TestEvaluate_SedFlows(t *testing.T) {
 		assert.Equal(t, decisionAllow, r.decision)
 	})
 
+	t.Run("read-only sed with direct line-number pipeline allowed", func(t *testing.T) {
+		r := evaluateAll(`start=$(grep -n "func TestSyncAllSinceOpenCodeStorageRequiresSessionMtime" internal/sync/engine_integration_test.go | cut -d: -f1); sed -n "${start},$((start+90))p" internal/sync/engine_integration_test.go`)
+		require.NotNil(t, r)
+		assert.Equal(t, "var assignment | sed", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
 	t.Run("read-only sed with untracked end address asks", func(t *testing.T) {
 		r := evaluateAll(`start=$(cat internal/sync/engine.go); sed -n "$((start-2)),${start}p" internal/sync/engine.go`)
 		require.NotNil(t, r)
@@ -181,8 +188,8 @@ func TestEvaluate_SedFlows(t *testing.T) {
 		assert.Equal(t, decisionAsk, r.decision)
 	})
 
-	t.Run("read-only sed with multi-match line pipeline asks", func(t *testing.T) {
-		r := evaluateAll(`start=$(grep -n '^func ' internal/sync/engine.go | cut -d: -f1); sed -n "$((start-2)),${start}p" internal/sync/engine.go`)
+	t.Run("read-only sed with unsafe line pipeline middle asks", func(t *testing.T) {
+		r := evaluateAll(`start=$(grep -n '^func ' internal/sync/engine.go | sed 's/^/x/' | cut -d: -f1); sed -n "$((start-2)),${start}p" internal/sync/engine.go`)
 		require.NotNil(t, r)
 		assert.Equal(t, "var assignment | sed", r.reason)
 		assert.Equal(t, decisionAsk, r.decision)
