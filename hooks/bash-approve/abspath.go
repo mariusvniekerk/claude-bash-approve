@@ -34,6 +34,8 @@ var homeRelativeAbsPathSuffixes = []string{
 	".npm/",
 	".pyenv/",
 	".nix-profile/",
+	".local/share/mise/installs/",
+	".local/share/mise/shims/",
 }
 
 // isSafeAbsolutePath returns nil if matchedPrefix starts with one of the

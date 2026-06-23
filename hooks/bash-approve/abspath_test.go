@@ -38,6 +38,8 @@ func TestIsSafeAbsolutePath(t *testing.T) {
 		{"$HOME/.npm/", "/tmp/test-home/.npm/_cacache/", true, ""},
 		{"$HOME/.pyenv/", "/tmp/test-home/.pyenv/shims/", true, ""},
 		{"$HOME/.nix-profile/", "/tmp/test-home/.nix-profile/bin/", true, ""},
+		{"$HOME/.local/share/mise/installs/", "/tmp/test-home/.local/share/mise/installs/github-golangci-golangci-lint/2.12.2/", true, ""},
+		{"$HOME/.local/share/mise/shims/", "/tmp/test-home/.local/share/mise/shims/", true, ""},
 		{"/opt/sketchy/ unknown", "/opt/sketchy/", false, decisionAsk},
 		{"/tmp/ unknown", "/tmp/", false, decisionAsk},
 		{"/tmp/anything/ unknown", "/tmp/anything/", false, decisionAsk},
@@ -112,5 +114,14 @@ func TestEvaluate_AbsolutePathFlows(t *testing.T) {
 		r := evaluateAll("/usr/../../tmp/cat foo")
 		require.NotNil(t, r)
 		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("mise-installed golangci-lint with safe goflags allowed", func(t *testing.T) {
+		t.Setenv("HOME", "/tmp/test-home")
+
+		r := evaluateAll(`GOFLAGS="-tags=fts5" /tmp/test-home/.local/share/mise/installs/github-golangci-golangci-lint/2.12.2/golangci-lint run --enable-only unused ./internal/parser/ 2>&1 | head -20`)
+		require.NotNil(t, r)
+		assert.Equal(t, "env vars+absolute path+golangci-lint | read-only", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
 	})
 }
