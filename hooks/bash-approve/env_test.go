@@ -103,6 +103,13 @@ func TestEnvAllowStaticValues(t *testing.T) {
 	}{
 		{"CARGO_BUILD_RUSTFLAGS target cpu", "CARGO_BUILD_RUSTFLAGS", "-Ctarget-cpu=native", true},
 		{"CARGO_BUILD_RUSTFLAGS linker", "CARGO_BUILD_RUSTFLAGS", "-Clinker=/tmp/cc", false},
+		{"GIT_SEQUENCE_EDITOR true", "GIT_SEQUENCE_EDITOR", "true", true},
+		{"GIT_SEQUENCE_EDITOR colon", "GIT_SEQUENCE_EDITOR", ":", true},
+		{"GIT_SEQUENCE_EDITOR pick to edit", "GIT_SEQUENCE_EDITOR", `sed -i.bak "s/^pick d8bd2adcf/edit d8bd2adcf/"`, true},
+		{"GIT_SEQUENCE_EDITOR pick to edit with -e", "GIT_SEQUENCE_EDITOR", `sed --in-place -e 's/^pick d8bd2adcf/edit d8bd2adcf/'`, true},
+		{"GIT_SEQUENCE_EDITOR arbitrary shell", "GIT_SEQUENCE_EDITOR", `sh -c 'echo pwn'`, false},
+		{"GIT_SEQUENCE_EDITOR sha mismatch", "GIT_SEQUENCE_EDITOR", `sed -i.bak "s/^pick d8bd2adcf/edit a5f8298dd/"`, false},
+		{"GIT_SEQUENCE_EDITOR drop asks", "GIT_SEQUENCE_EDITOR", `sed -i.bak "s/^pick d8bd2adcf/drop d8bd2adcf/"`, false},
 		{"GOFLAGS buildvcs", "GOFLAGS", "-buildvcs=false", true},
 		{"GOFLAGS tags", "GOFLAGS", "-tags=fts5", true},
 		{"GOFLAGS trimpath and mod", "GOFLAGS", "-trimpath -mod=readonly", true},
@@ -221,8 +228,28 @@ func TestEvaluate_EnvVarFlows(t *testing.T) {
 		assert.Equal(t, "env vars+git write op", r.reason)
 	})
 
+	t.Run("GIT_SEQUENCE_EDITOR true allows interactive git rebase", func(t *testing.T) {
+		r := evaluateAll("GIT_SEQUENCE_EDITOR=true GIT_EDITOR=true git rebase -i --autosquash a5f8298dd 2>&1 | tail -15")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "env vars+git write op | read-only", r.reason)
+	})
+
+	t.Run("GIT_SEQUENCE_EDITOR sed pick to edit allows interactive git rebase", func(t *testing.T) {
+		r := evaluateAll(`GIT_SEQUENCE_EDITOR='sed -i.bak "s/^pick d8bd2adcf/edit d8bd2adcf/"' GIT_EDITOR=true git rebase -i a5f8298dd 2>&1 | tail -6`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "env vars+git write op | read-only", r.reason)
+	})
+
 	t.Run("GIT_EDITOR arbitrary command still asks", func(t *testing.T) {
 		r := evaluateAll("GIT_EDITOR='sh -c evil' git rebase --continue")
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("GIT_SEQUENCE_EDITOR arbitrary command still asks", func(t *testing.T) {
+		r := evaluateAll("GIT_SEQUENCE_EDITOR='sh -c evil' git rebase -i main")
 		require.NotNil(t, r)
 		assert.Equal(t, decisionAsk, r.decision)
 	})

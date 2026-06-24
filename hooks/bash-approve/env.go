@@ -137,6 +137,7 @@ var envAllowExactValues = map[string]map[string]bool{
 
 var envAllowStaticValues = map[string]func(string) bool{
 	"CARGO_BUILD_RUSTFLAGS": isSafeRustFlags,
+	"GIT_SEQUENCE_EDITOR":   isSafeGitSequenceEditor,
 	"GOFLAGS":               isSafeGoFlags,
 	"GRADLE_OPTS":           isSafeJvmOptions,
 	"JAVA_OPTS":             isSafeJvmOptions,
@@ -205,6 +206,105 @@ func validateEnvAssignments(assignments []envAssignment) *result {
 		}
 	}
 	return nil
+}
+
+func isSafeGitSequenceEditor(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "true" || value == ":" {
+		return true
+	}
+	parser := syntax.NewParser(syntax.Variant(syntax.LangBash))
+	file, err := parser.Parse(strings.NewReader(value), "")
+	if err != nil || len(file.Stmts) != 1 {
+		return false
+	}
+	stmt := file.Stmts[0]
+	if stmt == nil || len(stmt.Redirs) > 0 {
+		return false
+	}
+	call, ok := stmt.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Assigns) > 0 || len(call.Args) == 0 {
+		return false
+	}
+	name, ok := wordDecodedLiteral(call.Args[0])
+	if !ok || name != "sed" {
+		return false
+	}
+	return isSafeGitSequenceEditorSed(call.Args[1:])
+}
+
+func isSafeGitSequenceEditorSed(args []*syntax.Word) bool {
+	inPlace := false
+	var scripts []string
+	for i := 0; i < len(args); i++ {
+		lit, ok := wordDecodedLiteral(args[i])
+		if !ok {
+			return false
+		}
+		switch {
+		case lit == "-i" || strings.HasPrefix(lit, "-i."):
+			inPlace = true
+		case lit == "--in-place" || strings.HasPrefix(lit, "--in-place="):
+			inPlace = true
+		case lit == "-e":
+			i++
+			if i >= len(args) {
+				return false
+			}
+			script, ok := wordDecodedLiteral(args[i])
+			if !ok {
+				return false
+			}
+			scripts = append(scripts, script)
+		case strings.HasPrefix(lit, "-e") && len(lit) > 2:
+			scripts = append(scripts, lit[2:])
+		case strings.HasPrefix(lit, "-"):
+			return false
+		default:
+			scripts = append(scripts, lit)
+			if i != len(args)-1 {
+				return false
+			}
+		}
+	}
+	return inPlace && len(scripts) == 1 && isSafeGitRebaseTodoSedSubstitution(scripts[0])
+}
+
+func isSafeGitRebaseTodoSedSubstitution(program string) bool {
+	if len(program) < 4 || program[0] != 's' {
+		return false
+	}
+	delim := program[1]
+	if delim == '\\' || strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 \t\r\n", rune(delim)) {
+		return false
+	}
+	parts := strings.Split(program[2:], string(delim))
+	if len(parts) != 3 || parts[2] != "" {
+		return false
+	}
+	const pickPrefix = "^pick "
+	if !strings.HasPrefix(parts[0], pickPrefix) {
+		return false
+	}
+	sha := strings.TrimSpace(strings.TrimPrefix(parts[0], pickPrefix))
+	replacementFields := strings.Fields(parts[1])
+	return isGitObjectIDPrefix(sha) &&
+		len(replacementFields) == 2 &&
+		replacementFields[0] == "edit" &&
+		replacementFields[1] == sha
+}
+
+func isGitObjectIDPrefix(value string) bool {
+	if len(value) < 7 || len(value) > 40 {
+		return false
+	}
+	for _, r := range value {
+		if ('0' <= r && r <= '9') || ('a' <= r && r <= 'f') || ('A' <= r && r <= 'F') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func isSafeNodeOptions(value string) bool {
