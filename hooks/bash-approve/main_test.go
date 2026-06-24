@@ -675,6 +675,53 @@ func TestForLoopDynamicTmpRedirectTraversalAsks(t *testing.T) {
 	assert.Equal(t, decisionAsk, r.decision)
 }
 
+func TestForLoopParamExpansionSedRangeAllows(t *testing.T) {
+	repo := initGitRepo(t)
+
+	r := evaluateAllInDir(`cd "$(git rev-parse --show-toplevel)"
+for entry in "kata/KataIssueActions:133:139" "kata/KataIssueOverflowMenu:145:151" "recurrence/RecurrenceEditorDialog:54:72" "shared/IssuePickerDialog:155:162" "shared/QuickCapture:63:67"; do
+  f="${entry%%:*}"; rest="${entry#*:}"; start="${rest%%:*}"; end="${rest##*:}"
+  echo "=== $f ($start-$end) ==="
+  sed -n "${start},${end}p" "frontend/src/lib/components/$f.svelte"
+  echo
+done`, repo)
+	require.NotNil(t, r)
+	assert.Equal(t, decisionAllow, r.decision)
+	assert.Equal(t, "cd | for{var assignment | var assignment | var assignment | var assignment | echo | sed | echo}", r.reason)
+}
+
+func TestForLoopAssignedPipelineUsesStaticAssignments(t *testing.T) {
+	r := evaluateAll(`for b in vibe positron codex; do
+  br="provider-$b"
+  added=$(git show "$br" -- internal/sync/parsediff.go cmd/agentsview/parse_diff.go internal/ssh/resolve.go internal/sync/engine.go 2>/dev/null | grep -E '^\+func |^\+func \(' | grep -oE 'func (\([^)]*\) )?[a-zA-Z]+' | sed 's/func //' | grep -vE '^\(' | sort -u | tr '\n' ' ')
+  printf "%-22s %s\n" "$b" "$added"
+done`)
+	require.NotNil(t, r)
+	assert.Equal(t, decisionAllow, r.decision)
+	assert.Equal(t, "for{var assignment | var assignment | echo}", r.reason)
+}
+
+func TestDeclareLocalNamesUseStandaloneAssignmentPolicy(t *testing.T) {
+	t.Run("associative array local name allows", func(t *testing.T) {
+		r := evaluateAll(`declare -A branchparent`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "shell vars", r.reason)
+	})
+
+	t.Run("dangerous local name still asks", func(t *testing.T) {
+		r := evaluateAll(`declare PATH=/tmp/bin`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("exported declare stays strict", func(t *testing.T) {
+		r := evaluateAll(`declare -x branchparent`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+}
+
 func TestEvaluate_Wrappers(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -974,6 +1021,36 @@ func TestCmdSubst_StaticStringEvaluators(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			args := parseCallArgs(t, "echo "+tt.word)
 			got, ok := wordDecodedLiteralWithContext(args[1], tt.ctx)
+			require.True(t, ok)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestParamExpansion_StaticStringRemoval(t *testing.T) {
+	ctx := evalContext{shellVars: map[string]string{
+		"entry": "kata/KataIssueActions:133:139",
+		"path":  "frontend/src/lib/components/shared/QuickCapture.svelte",
+		"rest":  "133:139",
+	}}
+
+	tests := []struct {
+		name string
+		word string
+		want string
+	}{
+		{"largest suffix removes colon range", `"${entry%%:*}"`, "kata/KataIssueActions"},
+		{"smallest prefix removes first colon field", `"${entry#*:}"`, "133:139"},
+		{"largest prefix removes through last colon", `"${rest##*:}"`, "139"},
+		{"smallest suffix removes last path segment", `"${path%/*}"`, "frontend/src/lib/components/shared"},
+		{"largest prefix keeps basename", `"${path##*/}"`, "QuickCapture.svelte"},
+		{"literal suffix removal", `"${path%.svelte}"`, "frontend/src/lib/components/shared/QuickCapture"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := parseCallArgs(t, "echo "+tt.word)
+			got, ok := wordDecodedLiteralWithContext(args[1], ctx)
 			require.True(t, ok)
 			assert.Equal(t, tt.want, got)
 		})

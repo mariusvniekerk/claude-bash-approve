@@ -39,7 +39,7 @@ func isSedSafe(args []*syntax.Word, ctx evalContext) bool {
 	_, hasShortI := parsed.flags["i"]
 	_, hasLongI := parsed.flags["in-place"]
 	if !hasShortI && !hasLongI {
-		return parsed.allLiteral || isReadOnlySedSafe(args[1:])
+		return parsed.allLiteral || isReadOnlySedSafe(args[1:], ctx)
 	}
 	if !parsed.allLiteral {
 		// Dynamic in-place targets can't be verified — be conservative.
@@ -72,7 +72,7 @@ func isSedSafe(args []*syntax.Word, ctx evalContext) bool {
 		if path == "" {
 			return false
 		}
-		if teeTargetInRepo(ctx.cwd, path) {
+		if writeTargetInRepoFamily(ctx.cwd, path) {
 			continue
 		}
 		if isSafeWriteTarget(path) {
@@ -83,7 +83,7 @@ func isSedSafe(args []*syntax.Word, ctx evalContext) bool {
 	return true
 }
 
-func isReadOnlySedSafe(args []*syntax.Word) bool {
+func isReadOnlySedSafe(args []*syntax.Word, ctx evalContext) bool {
 	hasProgram := false
 	afterDoubleDash := false
 	for i := 0; i < len(args); i++ {
@@ -95,7 +95,7 @@ func isReadOnlySedSafe(args []*syntax.Word) bool {
 			if hasProgram {
 				continue
 			}
-			if !isCmdSubstSedProgram(args[i]) {
+			if !isDynamicReadOnlySedProgram(args[i], ctx) {
 				return false
 			}
 			hasProgram = true
@@ -106,13 +106,13 @@ func isReadOnlySedSafe(args []*syntax.Word) bool {
 			continue
 		}
 		if !afterDoubleDash && strings.HasPrefix(lit, "--") {
-			if !scanLongSedFlag(lit, args, &i, &hasProgram) {
+			if !scanLongSedFlag(lit, args, &i, &hasProgram, ctx) {
 				return false
 			}
 			continue
 		}
 		if !afterDoubleDash && strings.HasPrefix(lit, "-") && len(lit) > 1 {
-			if !scanShortSedFlags(lit, args, &i, &hasProgram) {
+			if !scanShortSedFlags(lit, args, &i, &hasProgram, ctx) {
 				return false
 			}
 			continue
@@ -124,7 +124,7 @@ func isReadOnlySedSafe(args []*syntax.Word) bool {
 	return true
 }
 
-func scanLongSedFlag(lit string, args []*syntax.Word, idx *int, hasProgram *bool) bool {
+func scanLongSedFlag(lit string, args []*syntax.Word, idx *int, hasProgram *bool, ctx evalContext) bool {
 	name := strings.TrimPrefix(lit, "--")
 	if flag, _, ok := strings.Cut(name, "="); ok {
 		name = flag
@@ -137,7 +137,7 @@ func scanLongSedFlag(lit string, args []*syntax.Word, idx *int, hasProgram *bool
 	}
 	if !strings.Contains(lit, "=") {
 		(*idx)++
-		if *idx >= len(args) || !isSedProgramArgSafe(args[*idx]) {
+		if *idx >= len(args) || !isSedProgramArgSafe(args[*idx], ctx) {
 			return false
 		}
 	}
@@ -145,7 +145,7 @@ func scanLongSedFlag(lit string, args []*syntax.Word, idx *int, hasProgram *bool
 	return true
 }
 
-func scanShortSedFlags(lit string, args []*syntax.Word, idx *int, hasProgram *bool) bool {
+func scanShortSedFlags(lit string, args []*syntax.Word, idx *int, hasProgram *bool, ctx evalContext) bool {
 	for j := 1; j < len(lit); j++ {
 		c := lit[j]
 		if c == 'i' {
@@ -160,7 +160,7 @@ func scanShortSedFlags(lit string, args []*syntax.Word, idx *int, hasProgram *bo
 		}
 		if j+1 >= len(lit) {
 			(*idx)++
-			if *idx >= len(args) || !isSedProgramArgSafe(args[*idx]) {
+			if *idx >= len(args) || !isSedProgramArgSafe(args[*idx], ctx) {
 				return false
 			}
 		}
@@ -170,36 +170,44 @@ func scanShortSedFlags(lit string, args []*syntax.Word, idx *int, hasProgram *bo
 	return true
 }
 
-func isSedProgramArgSafe(w *syntax.Word) bool {
+func isSedProgramArgSafe(w *syntax.Word, ctx evalContext) bool {
 	if wordLiteral(w) != "" {
 		return true
 	}
-	return isCmdSubstSedProgram(w)
+	return isDynamicReadOnlySedProgram(w, ctx)
 }
 
-func isCmdSubstSedProgram(w *syntax.Word) bool {
+func isDynamicReadOnlySedProgram(w *syntax.Word, ctx evalContext) bool {
 	if w == nil {
 		return false
 	}
-	sawCmdSubst := false
+	sawDynamic := false
 	for _, part := range w.Parts {
-		if !sedProgramPartAllowsCmdSubst(part, &sawCmdSubst) {
+		if !sedProgramPartAllowsDynamic(part, &sawDynamic, ctx) {
 			return false
 		}
 	}
-	return sawCmdSubst
+	return sawDynamic
 }
 
-func sedProgramPartAllowsCmdSubst(part syntax.WordPart, sawCmdSubst *bool) bool {
+func sedProgramPartAllowsDynamic(part syntax.WordPart, sawDynamic *bool, ctx evalContext) bool {
 	switch p := part.(type) {
 	case *syntax.Lit, *syntax.SglQuoted:
 		return true
 	case *syntax.CmdSubst:
-		*sawCmdSubst = true
+		*sawDynamic = true
 		return true
+	case *syntax.ArithmExp:
+		*sawDynamic = true
+		return arithmeticExpansionHasNoCommandSubst(p)
+	case *syntax.ProcSubst:
+		return false
+	case *syntax.ParamExp:
+		*sawDynamic = true
+		return isSedAddressParamExp(p, ctx)
 	case *syntax.DblQuoted:
 		for _, inner := range p.Parts {
-			if !sedProgramPartAllowsCmdSubst(inner, sawCmdSubst) {
+			if !sedProgramPartAllowsDynamic(inner, sawDynamic, ctx) {
 				return false
 			}
 		}
@@ -207,4 +215,45 @@ func sedProgramPartAllowsCmdSubst(part syntax.WordPart, sawCmdSubst *bool) bool 
 	default:
 		return false
 	}
+}
+
+func isSedAddressParamExp(p *syntax.ParamExp, ctx evalContext) bool {
+	if p == nil || p.Param == nil || ctx.sedAddressVars == nil {
+		return false
+	}
+	if p.Excl || p.Length || p.Width || p.Index != nil || p.Slice != nil ||
+		p.Repl != nil || p.Names != 0 || p.Exp != nil {
+		return false
+	}
+	return ctx.sedAddressVars[p.Param.Value]
+}
+
+func arithmeticExpansionHasNoCommandSubst(exp *syntax.ArithmExp) bool {
+	if exp == nil || exp.X == nil {
+		return false
+	}
+	ok := true
+	syntax.Walk(exp.X, func(n syntax.Node) bool {
+		switch n.(type) {
+		case *syntax.CmdSubst, *syntax.ProcSubst:
+			ok = false
+			return false
+		case *syntax.DblQuoted:
+			for _, part := range n.(*syntax.DblQuoted).Parts {
+				if _, isCmd := part.(*syntax.CmdSubst); isCmd {
+					ok = false
+					return false
+				}
+				if _, isProc := part.(*syntax.ProcSubst); isProc {
+					ok = false
+					return false
+				}
+			}
+			if !ok {
+				return false
+			}
+		}
+		return true
+	})
+	return ok
 }

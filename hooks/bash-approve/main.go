@@ -87,6 +87,8 @@ type evalContext struct {
 	cwd                        string
 	safeCDPrefixes             []string
 	shellVars                  map[string]string
+	sedAddressVars             map[string]bool
+	lineRecordVars             map[string]int
 	xargsHasPipelineInput      bool
 	xargsInputFromReadOnlyPipe bool
 	// wrapperPats and commandPats carry the config-filtered pattern
@@ -570,11 +572,40 @@ func evaluateDeclClause(c *syntax.DeclClause, ctx evalContext, wrapperPats, comm
 		return r
 	}
 	out := approved("shell vars")
-	if r := validateEnvAssignments(envAssignmentsFromSyntax(c.Args)); r != nil {
+	assignments := envAssignmentsFromSyntax(c.Args)
+	var r *result
+	if declClauseExportsEnv(c) {
+		r = validateEnvAssignments(assignments)
+	} else {
+		r = validateStandaloneAssignments(assignments)
+	}
+	if r != nil {
 		out.decision = r.decision
 		out.denyReason = r.denyReason
 	}
 	return out
+}
+
+func declClauseExportsEnv(c *syntax.DeclClause) bool {
+	if c == nil || c.Variant == nil {
+		return false
+	}
+	if c.Variant.Value == "export" {
+		return true
+	}
+	for _, arg := range c.Args {
+		if arg == nil || !arg.Naked || arg.Name != nil || arg.Value == nil {
+			continue
+		}
+		lit, ok := wordDecodedLiteral(arg.Value)
+		if !ok {
+			return true
+		}
+		if strings.HasPrefix(lit, "-") && !strings.HasPrefix(lit, "--") && strings.Contains(lit[1:], "x") {
+			return true
+		}
+	}
+	return false
 }
 
 // checkForLoop validates the iteration/condition of a for loop.
@@ -606,6 +637,9 @@ func contextWithStaticWordIter(ctx evalContext, loop syntax.Loop) evalContext {
 	if !ok || iter.Name == nil || len(iter.Items) == 0 {
 		return ctx
 	}
+	if len(iter.Items) == 1 && isLineNumberPipelineAssignment(iter.Items[0], ctx) {
+		return contextWithSedAddressLoopVar(ctx, iter.Name.Value)
+	}
 	var representative string
 	for i, word := range iter.Items {
 		value, ok := wordDecodedLiteralWithContext(word, ctx)
@@ -622,6 +656,37 @@ func contextWithStaticWordIter(ctx evalContext, loop syntax.Loop) evalContext {
 		next.shellVars = make(map[string]string, 1)
 	}
 	next.shellVars[iter.Name.Value] = representative
+	next.sedAddressVars = maps.Clone(ctx.sedAddressVars)
+	if isSedAddressLiteral(representative) {
+		if next.sedAddressVars == nil {
+			next.sedAddressVars = make(map[string]bool, 1)
+		}
+		next.sedAddressVars[iter.Name.Value] = true
+	} else if next.sedAddressVars != nil {
+		delete(next.sedAddressVars, iter.Name.Value)
+	}
+	next.lineRecordVars = maps.Clone(ctx.lineRecordVars)
+	if next.lineRecordVars != nil {
+		delete(next.lineRecordVars, iter.Name.Value)
+	}
+	return next
+}
+
+func contextWithSedAddressLoopVar(ctx evalContext, name string) evalContext {
+	next := ctx
+	next.shellVars = maps.Clone(ctx.shellVars)
+	if next.shellVars != nil {
+		delete(next.shellVars, name)
+	}
+	next.sedAddressVars = maps.Clone(ctx.sedAddressVars)
+	if next.sedAddressVars == nil {
+		next.sedAddressVars = make(map[string]bool, 1)
+	}
+	next.sedAddressVars[name] = true
+	next.lineRecordVars = maps.Clone(ctx.lineRecordVars)
+	if next.lineRecordVars != nil {
+		delete(next.lineRecordVars, name)
+	}
 	return next
 }
 
@@ -993,7 +1058,7 @@ func validateRedirect(redir *syntax.Redirect, ctx evalContext) *result {
 	if isSafeWriteTarget(target) {
 		return nil
 	}
-	if !teeTargetInRepo(ctx.cwd, target) {
+	if !writeTargetInRepoFamily(ctx.cwd, target) {
 		return &result{decision: decisionAsk}
 	}
 	return nil
@@ -1108,11 +1173,125 @@ func paramExpLiteral(p *syntax.ParamExp, ctx evalContext) (string, bool) {
 		return "", false
 	}
 	if p.Excl || p.Length || p.Width || p.Index != nil || p.Slice != nil ||
-		p.Repl != nil || p.Names != 0 || p.Exp != nil {
+		p.Repl != nil || p.Names != 0 {
 		return "", false
 	}
 	val, ok := ctx.shellVars[p.Param.Value]
-	return val, ok
+	if !ok {
+		return "", false
+	}
+	if p.Exp == nil {
+		return val, true
+	}
+	return applyParamExpansionRemoval(val, p.Exp, ctx)
+}
+
+func applyParamExpansionRemoval(value string, exp *syntax.Expansion, ctx evalContext) (string, bool) {
+	switch exp.Op {
+	case syntax.RemSmallSuffix, syntax.RemLargeSuffix, syntax.RemSmallPrefix, syntax.RemLargePrefix:
+		// supported below
+	default:
+		return "", false
+	}
+	pattern, ok := paramExpansionPatternLiteral(exp.Word, ctx)
+	if !ok {
+		return "", false
+	}
+	switch exp.Op {
+	case syntax.RemSmallPrefix:
+		return removeParamPrefix(value, pattern, false), true
+	case syntax.RemLargePrefix:
+		return removeParamPrefix(value, pattern, true), true
+	case syntax.RemSmallSuffix:
+		return removeParamSuffix(value, pattern, false), true
+	case syntax.RemLargeSuffix:
+		return removeParamSuffix(value, pattern, true), true
+	}
+	return "", false
+}
+
+func paramExpansionPatternLiteral(w *syntax.Word, ctx evalContext) (string, bool) {
+	pattern, ok := wordDecodedLiteralWithContext(w, ctx)
+	if !ok || strings.Contains(pattern, "\x00") {
+		return "", false
+	}
+	// Keep the modeled subset small: literal text plus `*` and `?`.
+	// Character classes, extglobs, and escaped glob operators stay opaque.
+	if strings.ContainsAny(pattern, "[]\\") {
+		return "", false
+	}
+	return pattern, true
+}
+
+func removeParamPrefix(value, pattern string, longest bool) string {
+	best := -1
+	for i := 0; i <= len(value); i++ {
+		if !simpleShellPatternMatch(pattern, value[:i]) {
+			continue
+		}
+		if !longest {
+			return value[i:]
+		}
+		best = i
+	}
+	if best < 0 {
+		return value
+	}
+	return value[best:]
+}
+
+func removeParamSuffix(value, pattern string, longest bool) string {
+	best := -1
+	for i := 0; i <= len(value); i++ {
+		if !simpleShellPatternMatch(pattern, value[i:]) {
+			continue
+		}
+		if longest {
+			if best < 0 || i < best {
+				best = i
+			}
+			continue
+		}
+		if i > best {
+			best = i
+		}
+	}
+	if best < 0 {
+		return value
+	}
+	return value[:best]
+}
+
+func simpleShellPatternMatch(pattern, value string) bool {
+	type state struct {
+		p int
+		v int
+	}
+	memo := make(map[state]bool)
+	var match func(pIdx, vIdx int) bool
+	match = func(pIdx, vIdx int) bool {
+		key := state{p: pIdx, v: vIdx}
+		if hit, ok := memo[key]; ok {
+			return hit
+		}
+		var ok bool
+		switch {
+		case pIdx == len(pattern):
+			ok = vIdx == len(value)
+		case pattern[pIdx] == '*':
+			ok = match(pIdx+1, vIdx)
+			for i := vIdx; !ok && i < len(value); i++ {
+				ok = match(pIdx+1, i+1)
+			}
+		case pattern[pIdx] == '?':
+			ok = vIdx < len(value) && match(pIdx+1, vIdx+1)
+		default:
+			ok = vIdx < len(value) && pattern[pIdx] == value[vIdx] && match(pIdx+1, vIdx+1)
+		}
+		memo[key] = ok
+		return ok
+	}
+	return match(0, 0)
 }
 
 func literalConfigWithContextMode(ctx evalContext, mode staticSubstMode) *expand.Config {
@@ -1149,14 +1328,63 @@ func recordStandaloneAssignments(stmt *syntax.Stmt, ctx *evalContext) {
 		return
 	}
 	var updates map[string]string
+	var sedAddressUpdates map[string]bool
+	var lineRecordUpdates map[string]int
 	for _, assign := range call.Assigns {
 		if assign.Name == nil {
 			continue
 		}
+		name := assign.Name.Value
 		value := ""
 		if assign.Value != nil {
 			decoded, ok := wordDecodedLiteralWithContext(assign.Value, *ctx)
 			if !ok {
+				if isLineNumberPipelineAssignment(assign.Value, *ctx) {
+					if sedAddressUpdates == nil {
+						sedAddressUpdates = make(map[string]bool)
+					}
+					sedAddressUpdates[name] = true
+					if lineRecordUpdates == nil {
+						lineRecordUpdates = make(map[string]int)
+					}
+					lineRecordUpdates[name] = 0
+				} else if lineField, ok := isLineRecordPipelineAssignment(assign.Value, *ctx); ok {
+					if lineRecordUpdates == nil {
+						lineRecordUpdates = make(map[string]int)
+					}
+					lineRecordUpdates[name] = lineField
+					if sedAddressUpdates == nil {
+						sedAddressUpdates = make(map[string]bool)
+					}
+					sedAddressUpdates[name] = false
+				} else if isLineRecordCutSedAddressAssignment(assign.Value, *ctx) {
+					if sedAddressUpdates == nil {
+						sedAddressUpdates = make(map[string]bool)
+					}
+					sedAddressUpdates[name] = true
+					if lineRecordUpdates == nil {
+						lineRecordUpdates = make(map[string]int)
+					}
+					lineRecordUpdates[name] = 0
+				} else if isAwkPrintNRLineAssignment(assign.Value, *ctx) {
+					if sedAddressUpdates == nil {
+						sedAddressUpdates = make(map[string]bool)
+					}
+					sedAddressUpdates[name] = true
+					if lineRecordUpdates == nil {
+						lineRecordUpdates = make(map[string]int)
+					}
+					lineRecordUpdates[name] = 0
+				} else {
+					if sedAddressUpdates == nil {
+						sedAddressUpdates = make(map[string]bool)
+					}
+					sedAddressUpdates[name] = false
+					if lineRecordUpdates == nil {
+						lineRecordUpdates = make(map[string]int)
+					}
+					lineRecordUpdates[name] = 0
+				}
 				continue
 			}
 			value = decoded
@@ -1164,15 +1392,45 @@ func recordStandaloneAssignments(stmt *syntax.Stmt, ctx *evalContext) {
 		if updates == nil {
 			updates = make(map[string]string)
 		}
-		updates[assign.Name.Value] = value
+		updates[name] = value
+		if sedAddressUpdates == nil {
+			sedAddressUpdates = make(map[string]bool)
+		}
+		sedAddressUpdates[name] = isSedAddressLiteral(value)
+		if lineRecordUpdates == nil {
+			lineRecordUpdates = make(map[string]int)
+		}
+		lineRecordUpdates[name] = 0
 	}
-	if len(updates) == 0 {
+	if len(updates) == 0 && len(sedAddressUpdates) == 0 && len(lineRecordUpdates) == 0 {
 		return
 	}
-	if ctx.shellVars == nil {
+	if len(updates) > 0 && ctx.shellVars == nil {
 		ctx.shellVars = make(map[string]string, len(updates))
 	}
-	maps.Copy(ctx.shellVars, updates)
+	if len(updates) > 0 {
+		maps.Copy(ctx.shellVars, updates)
+	}
+	if len(sedAddressUpdates) > 0 && ctx.sedAddressVars == nil {
+		ctx.sedAddressVars = make(map[string]bool, len(sedAddressUpdates))
+	}
+	for name, ok := range sedAddressUpdates {
+		if ok {
+			ctx.sedAddressVars[name] = true
+		} else if ctx.sedAddressVars != nil {
+			delete(ctx.sedAddressVars, name)
+		}
+	}
+	if len(lineRecordUpdates) > 0 && ctx.lineRecordVars == nil {
+		ctx.lineRecordVars = make(map[string]int, len(lineRecordUpdates))
+	}
+	for name, field := range lineRecordUpdates {
+		if field > 0 {
+			ctx.lineRecordVars[name] = field
+		} else if ctx.lineRecordVars != nil {
+			delete(ctx.lineRecordVars, name)
+		}
+	}
 }
 
 // errUnhandledCmdSubst signals that a command substitution can't be evaluated

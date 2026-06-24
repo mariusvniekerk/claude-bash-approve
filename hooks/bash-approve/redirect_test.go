@@ -49,6 +49,16 @@ func TestRedirectSafeWritePrefixes(t *testing.T) {
 		assert.Equal(t, decisionAllow, r.decision)
 	})
 
+	t.Run("heredoc redirect to linked worktree path allows", func(t *testing.T) {
+		linkedWorktree := filepath.Join(t.TempDir(), "feature-worktree")
+		runGit(t, repo, "worktree", "add", "-b", "redirect-worktree-test", linkedWorktree, "HEAD")
+		target := filepath.Join(linkedWorktree, "scratch.log")
+
+		r := evaluateAllInDir("cat > "+target+" <<'EOF'\nhello\nEOF\necho \"written\"", repo)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
 	t.Run("redirect to /tmp via outside-prefix path asks", func(t *testing.T) {
 		// /tmpfoo doesn't start with /tmp/ — must not match the prefix.
 		r := evaluateAllInDir("git status > /tmpfoo", repo)

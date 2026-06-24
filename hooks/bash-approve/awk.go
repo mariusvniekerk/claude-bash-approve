@@ -1,8 +1,6 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -69,7 +67,7 @@ func isAwkSafe(args []*syntax.Word, ctx evalContext) bool {
 	for _, flag := range []string{"var", "field-separator", "source"} {
 		value, ok := parsed.flags[flag]
 		if ok && value != nil {
-			if _, decoded := wordDecodedLiteralWithContext(value, ctx); !decoded {
+			if !isAwkFlagValueSafe(flag, value, ctx) {
 				return false
 			}
 		}
@@ -109,6 +107,13 @@ func isAwkSafe(args []*syntax.Word, ctx evalContext) bool {
 		}
 	}
 	return true
+}
+
+func isAwkFlagValueSafe(flag string, value *syntax.Word, ctx evalContext) bool {
+	if _, decoded := wordDecodedLiteralWithContext(value, ctx); decoded {
+		return true
+	}
+	return flag == "var" && isAwkSedAddressVarAssignment(value, ctx)
 }
 
 // collectAwkSources returns every literal value supplied with -e or
@@ -427,7 +432,7 @@ func hasUnsafePrintRedirect(program string, ctx evalContext) bool {
 			return true
 		}
 		target, end, ok := parseAwkFileRedirectTarget(program, i)
-		if !ok || !awkRedirectTargetInRepoFamily(ctx.cwd, target) {
+		if !ok || !writeTargetInRepoFamily(ctx.cwd, target) {
 			return true
 		}
 		i = end - 1
@@ -494,24 +499,6 @@ func parseAwkStringLiteral(program string, start int) (string, int, bool) {
 		i++
 	}
 	return "", i, false
-}
-
-func awkRedirectTargetInRepoFamily(cwd, target string) bool {
-	if pathInCurrentRepoFamily(cwd, target) {
-		return true
-	}
-	abs := target
-	if !filepath.IsAbs(target) {
-		abs = filepath.Join(cwd, target)
-	}
-	if _, err := os.Lstat(abs); err == nil {
-		return false
-	}
-	parent := filepath.Dir(target)
-	if parent == target {
-		return false
-	}
-	return pathInCurrentRepoFamily(cwd, parent)
 }
 
 // hasPrintBefore reports whether `print` or `printf` appears in the program
