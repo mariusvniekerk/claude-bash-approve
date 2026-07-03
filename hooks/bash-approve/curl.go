@@ -131,19 +131,73 @@ var curlReadOnlyFlags = map[string]bool{
 
 // isCurlReadOnly returns true only if every flag in the curl invocation is
 // provably read-only. Unknown or non-literal flags fall back to "ask".
+// `-o`/`--output` is read-only when the target is a safe device or a safe
+// write prefix (same policy as write redirects).
 // args includes the command name at args[0]; flags start at args[1].
-func isCurlReadOnly(args []*syntax.Word, _ evalContext) bool {
+func isCurlReadOnly(args []*syntax.Word, ctx evalContext) bool {
 	if len(args) < 2 {
 		return true
 	}
-	p := parseArgs(args[1:], curlSpec)
+	p := parseArgsWithContext(args[1:], curlSpec, ctx)
 	if !p.allLiteral {
 		return false
 	}
-	for flag := range p.flags {
+	for flag, val := range p.flags {
+		if flag == "output" {
+			if !isSafeCurlOutputTarget(val, ctx) {
+				return false
+			}
+			continue
+		}
 		if !curlReadOnlyFlags[flag] {
 			return false
 		}
 	}
 	return true
+}
+
+// isSafeCurlOutputTarget reports whether a curl -o/--output value word
+// points somewhere a write is already considered harmless: a safe device
+// (/dev/null) or a safe write prefix (/tmp, /var/tmp and their /private
+// forms). parseArgs stores the whole flag token for attached-value forms
+// (`--output=x`, `-sLox`), so strip the flag prefix before checking.
+func isSafeCurlOutputTarget(val *syntax.Word, ctx evalContext) bool {
+	lit, ok := wordDecodedLiteralWithContext(val, ctx)
+	if !ok || lit == "" {
+		return false
+	}
+	if strings.HasPrefix(lit, "--") {
+		_, lit, ok = strings.Cut(lit[2:], "=")
+		if !ok {
+			return false
+		}
+	} else if strings.HasPrefix(lit, "-") {
+		// Combined short token: the value is everything after the first
+		// value-taking short flag (which parseArgs resolved to "output").
+		lit = combinedShortFlagValue(lit, "output")
+		if lit == "" {
+			return false
+		}
+	}
+	return safeRedirectDevices[lit] || isSafeWriteTarget(lit)
+}
+
+// combinedShortFlagValue extracts the attached value from a combined short
+// flag token like `-sLo/dev/null`, mirroring parseArgs: boolean flags are
+// skipped until the first value-taking flag, whose value is the remainder.
+// Returns "" if that flag doesn't canonicalize to want.
+func combinedShortFlagValue(lit, want string) string {
+	for j := 1; j < len(lit); j++ {
+		canonical := string(lit[j])
+		if name, ok := curlSpec.short[lit[j]]; ok {
+			canonical = name
+		}
+		if curlSpec.takesValue[canonical] {
+			if canonical == want {
+				return lit[j+1:]
+			}
+			return ""
+		}
+	}
+	return ""
 }
