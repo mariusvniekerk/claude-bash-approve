@@ -5,4 +5,5 @@ description = "Shared installer and hook runtime for Claude Code, OpenCode, Code
 requires-python = ">=3.11"
 
 [tool.uv]
+exclude-newer = "7 days"
 package = false

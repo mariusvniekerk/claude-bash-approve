@@ -25,6 +25,32 @@ func TestRedirectSafeWritePrefixes(t *testing.T) {
 		assert.Equal(t, decisionAllow, r.decision)
 	})
 
+	t.Run("redirect to /private/tmp allows", func(t *testing.T) {
+		// macOS: /tmp is a symlink to /private/tmp; the Claude Code
+		// scratchpad uses the resolved /private/tmp/claude-<uid>/... path.
+		r := evaluateAllInDir("git status > /private/tmp/claude-501/session/scratchpad/out.txt", repo)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("redirect to /private/var/tmp allows", func(t *testing.T) {
+		r := evaluateAllInDir("git status > /private/var/tmp/out.txt", repo)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("redirect to /private/tmpfoo asks", func(t *testing.T) {
+		r := evaluateAllInDir("git status > /private/tmpfoo", repo)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("redirect to /private/etc asks", func(t *testing.T) {
+		r := evaluateAllInDir("git status > /private/etc/hosts", repo)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
 	t.Run("append to /tmp allows", func(t *testing.T) {
 		r := evaluateAllInDir("git log >> /tmp/log.txt", repo)
 		require.NotNil(t, r)

@@ -981,6 +981,11 @@ var safeRedirectDevices = map[string]bool{
 var safeWritePrefixes = []string{
 	"/tmp/",
 	"/var/tmp/",
+	// macOS: /tmp and /var/tmp are symlinks into /private; commands often
+	// use the resolved paths (e.g. the Claude Code scratchpad under
+	// /private/tmp/claude-<uid>/).
+	"/private/tmp/",
+	"/private/var/tmp/",
 }
 
 // isSafeWriteTarget reports whether target is under a safe write
