@@ -91,3 +91,4 @@ node_modules/
 
 # Local tooling
 .pi-lens/
+.worktrees/

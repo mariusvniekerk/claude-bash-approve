@@ -199,7 +199,7 @@ func sedProgramPartAllowsDynamic(part syntax.WordPart, sawDynamic *bool, ctx eva
 		return true
 	case *syntax.ArithmExp:
 		*sawDynamic = true
-		return arithmeticExpansionHasNoCommandSubst(p)
+		return arithmeticExpansionHasSafeSedAddresses(p, ctx)
 	case *syntax.ProcSubst:
 		return false
 	case *syntax.ParamExp:
@@ -228,30 +228,34 @@ func isSedAddressParamExp(p *syntax.ParamExp, ctx evalContext) bool {
 	return ctx.sedAddressVars[p.Param.Value]
 }
 
-func arithmeticExpansionHasNoCommandSubst(exp *syntax.ArithmExp) bool {
+func arithmeticExpansionHasSafeSedAddresses(exp *syntax.ArithmExp, ctx evalContext) bool {
 	if exp == nil || exp.X == nil {
 		return false
 	}
 	ok := true
 	syntax.Walk(exp.X, func(n syntax.Node) bool {
-		switch n.(type) {
-		case *syntax.CmdSubst, *syntax.ProcSubst:
+		switch p := n.(type) {
+		case *syntax.CmdSubst:
+			if !isLineNumberPipelineCmdSubst(p, ctx) {
+				ok = false
+			}
+			return false
+		case *syntax.ProcSubst:
 			ok = false
 			return false
 		case *syntax.DblQuoted:
-			for _, part := range n.(*syntax.DblQuoted).Parts {
-				if _, isCmd := part.(*syntax.CmdSubst); isCmd {
-					ok = false
-					return false
+			for _, part := range p.Parts {
+				if cmd, isCmd := part.(*syntax.CmdSubst); isCmd {
+					if !isLineNumberPipelineCmdSubst(cmd, ctx) {
+						ok = false
+					}
+					continue
 				}
 				if _, isProc := part.(*syntax.ProcSubst); isProc {
 					ok = false
-					return false
 				}
 			}
-			if !ok {
-				return false
-			}
+			return false
 		}
 		return true
 	})
