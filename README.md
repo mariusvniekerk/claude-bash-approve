@@ -52,7 +52,7 @@ For local/manual install, run `python3 install.py install --target claude`.
 When Claude Code is about to run a matched tool call, this hook intercepts it and makes one of four decisions:
 
 - **deny** — command is blocked (with a reason shown to Claude)
-- **ask** — recognized command, user is prompted to confirm (terminal — no further hooks run) (e.g. `git tag`)
+- **ask** — recognized command, user is prompted to confirm (terminal — no further hooks run) (e.g. `git tag v1.0.0`)
 - **no opinion** — hook has nothing to say, exits silently so the next hook in the chain can handle it (e.g. `git push`, `gh pr create`, or unrecognized commands)
 - **allow** — command runs immediately, no prompt
 
@@ -216,7 +216,7 @@ Most matched commands are auto-approved. Some have different defaults:
 | Decision | Commands |
 |----------|----------|
 | **deny** (blocked, reason shown to Claude) | `git stash`, `git revert`, `git reset --hard`, `git checkout .`, `git clean -f`, `rm -r`, `go mod vendor`, `roborev tui` |
-| **ask** (terminal, user prompted) | `git tag` |
+| **ask** (terminal, user prompted) | `git tag` creation and mutation |
 | **no-opinion** (deferred to next hook) | `git push`, `jj git push`, `gh pr create`, `go mod init` |
 
 To override a default, add the specific command name to `enabled` or `disabled`.
@@ -232,7 +232,7 @@ To override a default, add the specific command name to `enabled` or `disabled`.
 | Group | Names |
 |-------|-------|
 | wrapper | `timeout`, `nice`, `env`, `env vars` (validates names against allowlist), `.venv`, `bundle exec`, `rtk proxy`, `command`, `node_modules/.bin`, `absolute path` (validates path prefix) |
-| git | `git read op`, `git write op`, `git push`, `git tag`, `git destructive` (`git stash`, `git revert`, `git reset --hard`, `git checkout .`, `git clean -f`) |
+| git | `git read op` (including `git tag` list/query forms), `git write op`, `git push`, `git tag` creation/mutation, `git destructive` (`git stash`, `git revert`, `git reset --hard`, `git checkout .`, `git clean -f`) |
 | jj | `jj read op`, `jj write op`, `jj git push` |
 | python | `pytest`, `python`, `ruff`, `uv`, `uvx` |
 | node | `npm`, `npx`, `node -e`, `playwright`, `vp`, `bun`, `bunx`, `vitest` |

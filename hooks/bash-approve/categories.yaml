@@ -18,7 +18,7 @@
 # When this file is absent or has no enabled/disabled keys, all commands are approved.
 #
 # Some commands default to "ask" (fall through to Claude Code's permission prompt):
-#   git push, git tag, gh pr create, go mod init
+#   git push, git tag creation/mutation, gh pr create, go mod init
 # To auto-approve them, add them to "enabled" explicitly.
 #
 # Some commands default to "deny" (blocked):
@@ -31,7 +31,8 @@
 #
 # Fine-grained names within each group:
 #   wrapper:  timeout, time, nice, env, env vars, .venv, bundle exec, rtk proxy, command, node_modules/.bin
-#   git:      git read op, git write op, git push (ask), git tag (ask), git destructive
+#   git:      git read op (including git tag list/query), git write op, git push (ask),
+#             git tag creation/mutation (ask), git destructive
 #             git stash (deny), git revert (deny), git reset --hard (deny),
 #             git checkout . (deny), git clean -f (deny),
 #             git config core.worktree (deny)

@@ -9,6 +9,95 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
+func isGitTagReadOnly(args []*syntax.Word, ctx evalContext) bool {
+	decoded := make([]string, len(args))
+	for i, arg := range args {
+		value, ok := wordDecodedLiteralWithContext(arg, ctx)
+		if !ok {
+			return false
+		}
+		decoded[i] = value
+	}
+
+	tagIndex := -1
+	for i := range len(decoded) {
+		if decoded[i] != "git" {
+			continue
+		}
+		candidate := i + 1
+		if candidate < len(decoded) && decoded[candidate] == "-C" {
+			candidate += 2
+		}
+		if candidate < len(decoded) && decoded[candidate] == "tag" {
+			tagIndex = candidate
+			break
+		}
+	}
+	if tagIndex < 0 {
+		return false
+	}
+	if tagIndex == len(decoded)-1 {
+		return true
+	}
+
+	listMode := false
+	for _, arg := range decoded[tagIndex+1:] {
+		switch {
+		case arg == "-l", arg == "--list", arg == "-i", arg == "--ignore-case",
+			arg == "--no-column", arg == "--omit-empty":
+			listMode = true
+		case isGitTagLinesOption(arg), isGitTagListValueOption(arg):
+			listMode = true
+		case arg == "--":
+			if !listMode {
+				return false
+			}
+		case strings.HasPrefix(arg, "-"):
+			return false
+		default:
+			if !listMode {
+				return false
+			}
+		}
+	}
+	return listMode
+}
+
+func isGitTagLinesOption(arg string) bool {
+	if arg == "-n" {
+		return true
+	}
+	if !strings.HasPrefix(arg, "-n") || len(arg) == 2 {
+		return false
+	}
+	for _, digit := range arg[2:] {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func isGitTagListValueOption(arg string) bool {
+	for _, name := range []string{
+		"contains",
+		"no-contains",
+		"points-at",
+		"merged",
+		"no-merged",
+		"sort",
+		"format",
+		"column",
+		"color",
+	} {
+		option := "--" + name
+		if arg == option || strings.HasPrefix(arg, option+"=") {
+			return true
+		}
+	}
+	return false
+}
+
 func evaluateReadTool(input ReadInput, ctx evalContext) *result {
 	if pathInCurrentRepo(ctx.cwd, input.FilePath) {
 		return approved("read")
