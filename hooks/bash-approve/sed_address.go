@@ -20,7 +20,11 @@ func isSedAddressLiteral(value string) bool {
 }
 
 func isLineNumberPipelineAssignment(w *syntax.Word, ctx evalContext) bool {
-	calls := singleCmdSubstPipeCalls(w)
+	return isLineNumberPipelineCmdSubst(singleCmdSubstWord(w), ctx)
+}
+
+func isLineNumberPipelineCmdSubst(cs *syntax.CmdSubst, ctx evalContext) bool {
+	calls := cmdSubstPipeCalls(cs)
 	if len(calls) < 2 {
 		return false
 	}
@@ -167,7 +171,10 @@ func isAwkPrintNRProgram(program string) bool {
 }
 
 func singleCmdSubstPipeCalls(w *syntax.Word) []*syntax.CallExpr {
-	cs := singleCmdSubstWord(w)
+	return cmdSubstPipeCalls(singleCmdSubstWord(w))
+}
+
+func cmdSubstPipeCalls(cs *syntax.CmdSubst) []*syntax.CallExpr {
 	if cs == nil || len(cs.Stmts) != 1 {
 		return nil
 	}

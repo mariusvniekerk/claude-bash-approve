@@ -269,6 +269,25 @@ func TestEvaluate_SedFlows(t *testing.T) {
 		assert.Equal(t, decisionAsk, r.decision)
 	})
 
+	t.Run("read-only sed with line-number substitution inside arithmetic allowed", func(t *testing.T) {
+		r := evaluateAll(`sed -n "$(($(grep -n 'func (s \*Server) resolveItem(' internal/server/huma_routes.go | cut -d: -f1)+55)),+60p" internal/server/huma_routes.go`)
+		require.NotNil(t, r)
+		assert.Equal(t, "sed", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("read-only sed with wrong line field inside arithmetic asks", func(t *testing.T) {
+		r := evaluateAll(`sed -n "$(($(grep -rn 'func x' internal/server | cut -d: -f1)+55)),+60p" file`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("read-only sed with non-line command inside arithmetic asks", func(t *testing.T) {
+		r := evaluateAll(`sed -n "$(( $(cat line.txt) + 1 ))p" file`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
 	t.Run("read-only sed with command substitution inside arithmetic denied", func(t *testing.T) {
 		r := evaluateAll(`sed -n "$(( $(rm -rf /) + 1 ))p" file`)
 		require.NotNil(t, r)
