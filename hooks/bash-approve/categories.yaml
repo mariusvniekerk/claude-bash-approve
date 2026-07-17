@@ -7,6 +7,14 @@
 # in addition to the current repo and linked worktrees. Targets and existing
 # prefixes are resolved through symlinks before comparison.
 #
+# `safe_env_prefixes` can list environment-variable name prefixes that extend
+# the built-in allowlist. Hard-deny and ask-only variable names still take
+# precedence. Empty prefixes are ignored.
+#
+# Example:
+# safe_env_prefixes:
+#   - MY_PROJECT_
+#
 # When this file is absent or has no enabled/disabled keys, all commands are approved.
 #
 # Some commands default to "ask" (fall through to Claude Code's permission prompt):

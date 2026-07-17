@@ -89,7 +89,8 @@ python3 install.py install --target claude
 
 OpenCode installs write plugin files under project/global OpenCode config and point them at shared runtime hook. Codex installs enable `hooks` and write `PermissionRequest` hook config pointing at shared runtime hook.
 
-TypeScript support for the OpenCode plugin is enforced via `bun --cwd opencode-tester run typecheck`.
+TypeScript support for the OpenCode and pi integrations is enforced through the
+root Vite+ typecheck: `bun run typecheck`.
 
 This repo also includes `prek.toml` for pre-commit checks:
 
@@ -103,8 +104,7 @@ Configured hooks run:
 - `uv run python -m unittest -v install_test.py`
 - `cd hooks/bash-approve && go test ./...`
 - `cd hooks/bash-approve && golangci-lint run ./...`
-- `bun run typecheck` for OpenCode tester
-- `bun run --cwd packages/pi-bash-approve typecheck` for pi package
+- `bun run typecheck` for both TypeScript workspaces through Vite+
 
 ### Manual setup
 
@@ -193,6 +193,21 @@ safe_cd_prefixes:
 ```
 
 Relative prefixes are ignored. The `cd` target and any existing configured prefix are resolved through symlinks before comparison, so a symlink under an allowed prefix that points outside the prefix is not approved.
+
+### Safe Environment-Variable Prefixes
+
+Project-specific environment-variable namespaces can extend the built-in
+allowlist through `safe_env_prefixes`:
+
+```yaml
+safe_env_prefixes:
+  - ACME_
+  - MY_PROJECT_TEST_
+```
+
+Configured prefixes are additive. Empty prefixes are ignored, and the existing
+hard-deny and ask-only variables (such as `LD_PRELOAD` and `PATH`) retain
+precedence even when a configured prefix would otherwise match them.
 
 ### Default decisions by command
 

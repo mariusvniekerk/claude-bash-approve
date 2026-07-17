@@ -154,15 +154,15 @@ var envAllowStaticValues = map[string]func(string) bool{
 // Hard-deny is checked across ALL names first so it can't be bypassed by
 // putting an unknown var earlier in the list.
 // Returns nil only if every name matches the allowlist.
-func validateEnvVarNames(names []string, _ evalContext) *result {
+func validateEnvVarNames(names []string, ctx evalContext) *result {
 	assignments := make([]envAssignment, 0, len(names))
 	for _, name := range names {
 		assignments = append(assignments, envAssignment{name: name})
 	}
-	return validateEnvAssignments(assignments)
+	return validateEnvAssignments(assignments, ctx)
 }
 
-func validateEnvAssignments(assignments []envAssignment) *result {
+func validateEnvAssignments(assignments []envAssignment, ctx evalContext) *result {
 	// Pass 1: hard-deny is unconditional regardless of where in the list it appears.
 	for _, assignment := range assignments {
 		if envHardDeny[assignment.name] {
@@ -199,6 +199,14 @@ func validateEnvAssignments(assignments []envAssignment) *result {
 			if strings.HasPrefix(name, p) {
 				matched = true
 				break
+			}
+		}
+		if !matched {
+			for _, p := range ctx.safeEnvPrefixes {
+				if p != "" && strings.HasPrefix(name, p) {
+					matched = true
+					break
+				}
 			}
 		}
 		if !matched {
@@ -545,5 +553,5 @@ func isSafeEnvVarsWrapper(matchedPrefix string, ctx evalContext) *result {
 			staticValue: true,
 		})
 	}
-	return validateEnvAssignments(assignments)
+	return validateEnvAssignments(assignments, ctx)
 }

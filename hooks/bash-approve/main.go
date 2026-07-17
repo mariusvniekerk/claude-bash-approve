@@ -86,6 +86,7 @@ type result struct {
 type evalContext struct {
 	cwd                        string
 	safeCDPrefixes             []string
+	safeEnvPrefixes            []string
 	shellVars                  map[string]string
 	sedAddressVars             map[string]bool
 	lineRecordVars             map[string]int
@@ -108,9 +109,10 @@ var shPrinter = syntax.NewPrinter()
 
 // Config represents the categories.yaml file.
 type Config struct {
-	Enabled        []string `yaml:"enabled"`
-	Disabled       []string `yaml:"disabled"`
-	SafeCDPrefixes []string `yaml:"safe_cd_prefixes"`
+	Enabled         []string `yaml:"enabled"`
+	Disabled        []string `yaml:"disabled"`
+	SafeCDPrefixes  []string `yaml:"safe_cd_prefixes"`
+	SafeEnvPrefixes []string `yaml:"safe_env_prefixes"`
 }
 
 // loadConfig reads categories.yaml from the same directory as the executable.
@@ -575,7 +577,7 @@ func evaluateDeclClause(c *syntax.DeclClause, ctx evalContext, wrapperPats, comm
 	assignments := envAssignmentsFromSyntax(c.Args)
 	var r *result
 	if declClauseExportsEnv(c) {
-		r = validateEnvAssignments(assignments)
+		r = validateEnvAssignments(assignments, ctx)
 	} else {
 		r = validateStandaloneAssignments(assignments)
 	}
@@ -807,12 +809,58 @@ func evaluateCallExpr(call *syntax.CallExpr, ctx evalContext, wrapperPats, comma
 		}
 	}
 
+	// A trusted bash/zsh binary with a static -c payload is another shell
+	// evaluation boundary. Reuse the full evaluator so inner denies and
+	// no-opinion results propagate exactly as if the payload were top-level.
+	if r, handled := handleStaticShellCommand(call, cmdName, ctx, wrapperPats, commandPats); handled {
+		return r
+	}
+
 	// Normal path: check all substitutions
 	if r, prop := substitutionPropagate(call, ctx, wrapperPats, commandPats); prop {
 		return r
 	}
 
 	return matchAndBuild(argsText(call.Args), nil, call.Assigns, call.Args, ctx, wrapperPats, commandPats)
+}
+
+func handleStaticShellCommand(call *syntax.CallExpr, cmdName string, ctx evalContext, wrapperPats, commandPats []pattern) (*result, bool) {
+	base := cmdName
+	if filepath.IsAbs(cmdName) {
+		base = filepath.Base(cmdName)
+	}
+	if base != "bash" && base != "zsh" {
+		return nil, false
+	}
+	if len(call.Args) != 3 {
+		return nil, false
+	}
+	flagValue, ok := wordDecodedLiteral(call.Args[1])
+	if !ok || (flagValue != "-c" && flagValue != "-lc") {
+		return nil, false
+	}
+	if filepath.IsAbs(cmdName) && isSafeAbsolutePath(filepath.Dir(cmdName)+string(os.PathSeparator), ctx) != nil {
+		return nil, true
+	}
+	payload, ok := wordDecodedLiteral(call.Args[2])
+	if !ok {
+		return nil, true
+	}
+	if r, prop := substitutionPropagate(call, ctx, wrapperPats, commandPats); prop {
+		return r, true
+	}
+	inner := evaluate(payload, ctx, wrapperPats, commandPats)
+	if inner == nil {
+		return nil, true
+	}
+	inner.reason = base + " -c+" + inner.reason
+	if len(call.Assigns) > 0 {
+		if override := validateEnvAssignments(envAssignmentsFromSyntax(call.Assigns), ctx); override != nil {
+			inner.decision, inner.denyReason = mergeAllDecisions(inner.decision, inner.denyReason, []*result{override})
+		}
+		inner.reason = "env vars+" + inner.reason
+	}
+	return inner, true
 }
 
 // matchAndBuild strips wrappers, matches the command, and builds the result.
@@ -850,7 +898,7 @@ func matchAndBuild(cmdText string, extraArgs []*syntax.Word, assigns []*syntax.A
 		}
 	}
 	if len(assigns) > 0 {
-		if r := validateEnvAssignments(envAssignmentsFromSyntax(assigns)); r != nil {
+		if r := validateEnvAssignments(envAssignmentsFromSyntax(assigns), ctx); r != nil {
 			overrides = append(overrides, r)
 		}
 	}
@@ -2028,6 +2076,7 @@ func resolveWhichOrCommandV(part syntax.WordPart) string {
 // Returns nil if rejected, or a *result with the approval reason.
 func Evaluate(cmd string, cfg Config, ctx evalContext) *result {
 	ctx.safeCDPrefixes = cfg.SafeCDPrefixes
+	ctx.safeEnvPrefixes = cfg.SafeEnvPrefixes
 	wrappers, commands := buildActivePatterns(cfg)
 	return evaluate(cmd, ctx, wrappers, commands)
 }

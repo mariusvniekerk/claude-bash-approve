@@ -149,6 +149,34 @@ func TestEnvAllowStaticValues(t *testing.T) {
 }
 
 func TestEvaluate_EnvVarFlows(t *testing.T) {
+	t.Run("configured safe prefix allows project variable", func(t *testing.T) {
+		cfg := Config{Enabled: []string{"all"}, SafeEnvPrefixes: []string{"KENN_"}}
+		r := Evaluate("KENN_TEST_POSTGRES_DSN=postgres://localhost/test go test ./...", cfg, evalContext{})
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("empty configured prefix does not allow unknown variable", func(t *testing.T) {
+		cfg := Config{Enabled: []string{"all"}, SafeEnvPrefixes: []string{""}}
+		r := Evaluate("UNKNOWN=value go test ./...", cfg, evalContext{})
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("configured prefix does not override ask exact variable", func(t *testing.T) {
+		cfg := Config{Enabled: []string{"all"}, SafeEnvPrefixes: []string{"PA"}}
+		r := Evaluate("PATH=/tmp go test ./...", cfg, evalContext{})
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAsk, r.decision)
+	})
+
+	t.Run("configured prefix does not override hard deny variable", func(t *testing.T) {
+		cfg := Config{Enabled: []string{"all"}, SafeEnvPrefixes: []string{"LD_"}}
+		r := Evaluate("LD_PRELOAD=/tmp/evil.so go test ./...", cfg, evalContext{})
+		require.NotNil(t, r)
+		assert.Equal(t, decisionDeny, r.decision)
+	})
+
 	t.Run("LD_PRELOAD denied", func(t *testing.T) {
 		r := evaluateAll("LD_PRELOAD=/tmp/evil.so cat foo")
 		require.NotNil(t, r)

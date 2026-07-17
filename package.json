@@ -4,11 +4,27 @@
     "opencode-tester",
     "packages/pi-bash-approve"
   ],
+  "scripts": {
+    "typecheck": "node node_modules/vite-plus/bin/vp check --no-fmt --no-lint"
+  },
   "devDependencies": {
     "@opencode-ai/plugin": "^1.4.1",
-    "@types/node": "^25.6.0"
+    "@types/node": "^25.6.0",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
   },
-  "scripts": {
-    "typecheck": "bun run --cwd opencode-tester typecheck"
+  "overrides": {
+    "vite": "catalog:"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "bun",
+      "version": "1.3.14",
+      "onFail": "download"
+    }
+  },
+  "catalog": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.2.4",
+    "vite-plus": "0.2.4"
   }
 }

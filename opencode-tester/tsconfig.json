@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
@@ -16,8 +15,5 @@
     "types": ["node", "bun-types"],
     "skipLibCheck": true
   },
-  "include": [
-    "src/**/*.ts",
-    "../opencode/**/*.ts"
-  ]
+  "include": ["src/**/*.ts", "../opencode/**/*.ts"]
 }

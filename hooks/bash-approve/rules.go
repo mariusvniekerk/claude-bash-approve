@@ -153,6 +153,7 @@ func commandPatterns() []pattern {
 		NewPattern(`^playwright\s+test\b`, tags("playwright", "node")),
 		NewPattern(`^vp\s+(test|build|check|run)\b`, tags("vp", "node")),
 		NewPattern(`^vp\s+exec\s+playwright\s+test\b`, tags("vp", "node")),
+		NewPattern(`^vp\s+exec\s+svelte-mcp\s+(get-documentation|svelte-autofixer)\b`, tags("vp", "node")),
 		NewPattern(`^bun\s+(install|run|test|build|add|remove|-[ep]|--eval)\b`, tags("bun", "node")),
 		NewPattern(`^bunx\b`, tags("bunx", "node")),
 		NewPattern(`^vitest\b`, tags("vitest", "node")),
