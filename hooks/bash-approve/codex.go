@@ -18,7 +18,6 @@ type CodexToolInput struct {
 }
 
 type CodexOutput struct {
-	Continue           bool                     `json:"continue"`
 	HookSpecificOutput *CodexHookSpecificOutput `json:"hookSpecificOutput,omitempty"`
 }
 
@@ -29,10 +28,13 @@ type CodexHookSpecificOutput struct {
 
 type CodexPermissionOutput struct {
 	Behavior string `json:"behavior"`
-	Reason   string `json:"reason,omitempty"`
+	Message  string `json:"message,omitempty"`
 }
 
-func emitCodexOutput(out CodexOutput) {
+func emitCodexOutput(out *CodexOutput) {
+	if out == nil {
+		os.Exit(0)
+	}
 	b, _ := json.Marshal(out)
 	fmt.Println(string(b))
 	os.Exit(0)
@@ -45,11 +47,11 @@ func evaluateCodexToolUse(input CodexInput, cfg Config) (string, *result) {
 	return input.ToolInput.Command, Evaluate(input.ToolInput.Command, cfg, evalContext{cwd: input.Cwd})
 }
 
-func buildCodexOutput(r *result) CodexOutput {
-	out := CodexOutput{Continue: true}
+func buildCodexOutput(r *result) *CodexOutput {
 	if r == nil || r.decision == "" || r.decision == decisionAsk {
-		return out
+		return nil
 	}
+	out := &CodexOutput{}
 
 	reason := r.reason
 	if r.decision == decisionDeny && r.denyReason != "" {
@@ -63,7 +65,7 @@ func buildCodexOutput(r *result) CodexOutput {
 		},
 	}
 	if r.decision == decisionDeny && reason != "" {
-		out.HookSpecificOutput.Decision.Reason = reason
+		out.HookSpecificOutput.Decision.Message = reason
 	}
 	return out
 }

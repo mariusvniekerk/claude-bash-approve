@@ -889,6 +889,14 @@ func matchAndBuild(cmdText string, extraArgs []*syntax.Word, assigns []*syntax.A
 	if matched.validate != nil && !matched.validate(astArgs, ctx) {
 		overrides = append(overrides, &result{decision: matched.validateFallback})
 	}
+	matchedDecision := matched.decision
+	matchedDenyReason := matched.denyReason
+	if matched.resolveDecision != nil {
+		if resolved := matched.resolveDecision(astArgs, ctx); resolved != nil {
+			matchedDecision = resolved.decision
+			matchedDenyReason = resolved.denyReason
+		}
+	}
 	for _, wm := range wrappers {
 		if wm.pattern.validateWrapper == nil {
 			continue
@@ -913,7 +921,7 @@ func matchAndBuild(cmdText string, extraArgs []*syntax.Word, assigns []*syntax.A
 	if len(wrapperLabels) > 0 {
 		reason = strings.Join(wrapperLabels, "+") + "+" + reason
 	}
-	finalDecision, finalDenyReason := mergeAllDecisions(matched.decision, matched.denyReason, overrides)
+	finalDecision, finalDenyReason := mergeAllDecisions(matchedDecision, matchedDenyReason, overrides)
 	return &result{reason: reason, decision: finalDecision, denyReason: finalDenyReason}
 }
 
@@ -2296,16 +2304,16 @@ func main() {
 		var data CodexInput
 		if err := json.Unmarshal(rawInput, &data); err != nil {
 			logDecision(db, agent, payload, "", "noop", "")
-			emitCodexOutput(CodexOutput{Continue: true})
+			emitCodexOutput(nil)
 		}
 
 		cmd, r := evaluateCodexToolUse(data, cfg)
 		out := buildCodexOutput(r)
 		decision := "noop"
 		reason := ""
-		if out.HookSpecificOutput != nil && out.HookSpecificOutput.Decision != nil {
+		if out != nil && out.HookSpecificOutput != nil && out.HookSpecificOutput.Decision != nil {
 			decision = out.HookSpecificOutput.Decision.Behavior
-			reason = out.HookSpecificOutput.Decision.Reason
+			reason = out.HookSpecificOutput.Decision.Message
 		}
 		logDecision(db, agent, payload, cmd, decision, reason)
 		emitCodexOutput(out)

@@ -15,6 +15,11 @@ import (
 // keep the matched decision, false to downgrade to no opinion.
 type argsValidator func(args []*syntax.Word, ctx evalContext) bool
 
+// decisionResolver replaces a matched pattern's baseline decision when the
+// command arguments provide enough context to make a more precise decision.
+// Returning nil keeps the pattern's configured decision.
+type decisionResolver func(args []*syntax.Word, ctx evalContext) *result
+
 // wrapperValidator runs after a wrapper regex matches; it inspects the
 // matched prefix text and returns a *result to override the wrapper's
 // default approve, or nil to keep the wrapper's existing decision.
@@ -29,6 +34,7 @@ type pattern struct {
 	denyReason       string
 	validate         argsValidator
 	validateFallback string
+	resolveDecision  decisionResolver
 	validateWrapper  wrapperValidator
 }
 
@@ -62,6 +68,14 @@ func WithValidator(v argsValidator) patternOption {
 func WithValidatorFallback(decision string) patternOption {
 	return func(p *pattern) {
 		p.validateFallback = decision
+	}
+}
+
+// WithDecisionResolver allows a pattern to replace its baseline decision
+// after inspecting the parsed command arguments.
+func WithDecisionResolver(resolve decisionResolver) patternOption {
+	return func(p *pattern) {
+		p.resolveDecision = resolve
 	}
 }
 
@@ -195,7 +209,7 @@ func commandPatterns() []pattern {
 		NewPattern(`^pixi\s+(list|tree|search|info|shell-hook|task\s+list|--version|--help)\b`, tags("pixi read", "pixi")),
 
 		// shell
-		NewPattern(`^rm\s+(-[a-zA-Z]*r[a-zA-Z]*|--recursive)\b`, tags("rm -r", "shell destructive", "shell"), WithDecision("deny"),
+		NewPattern(`^rm\s+(-[a-zA-Z]*r[a-zA-Z]*|--recursive)\b`, tags("rm -r", "shell destructive", "shell"), WithDecision("deny"), WithDecisionResolver(resolveRecursiveRmDecision),
 			WithDenyReason("BLOCKED: rm -r is banned. Remove specific files only, not entire directory trees.")),
 		NewPattern(`^(ls|cat|head|tail|wc|grep|rg|file|which|pwd|du|df|sort|uniq|cut|tr|xxd|od|hexdump|sqlite3|diff|cmp|comm|stat|realpath|basename|dirname|readlink|md5sum|sha256sum|shasum|b2sum|b3sum|lsof|ps|pgrep|jq|yq|id|whoami|hostname|uname|date|env|seq|tac|rev|column|nl|paste|join|expand|unexpand|fold|fmt|strings|bat|bc|dc|expr|dig|host|nslookup|netstat|free|nproc|printenv|groups|pv|xzcat|bzcat|zcat|lsblk)\b`, tags("read-only", "shell")),
 		NewPattern(`^(fd|fdfind)\b`, tags("fd", "shell"), WithValidator(isFdSafe)),

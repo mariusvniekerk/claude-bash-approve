@@ -1687,6 +1687,26 @@ func TestNoOpinionDecision(t *testing.T) {
 		assert.Equal(t, "deny", r.decision)
 	})
 
+	t.Run("rm -rf explicit in-repo directory allowed", func(t *testing.T) {
+		repo := t.TempDir()
+		require.NoError(t, exec.Command("git", "-C", repo, "init").Run())
+		require.NoError(t, os.MkdirAll(filepath.Join(repo, "scripts", "conformance", "__pycache__"), 0755))
+
+		r := evaluateAllInDir("rm -rf scripts/conformance/__pycache__", repo)
+		require.NotNil(t, r)
+		assert.Equal(t, "rm -r", r.reason)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("rm -rf repository root remains denied", func(t *testing.T) {
+		repo := t.TempDir()
+		require.NoError(t, exec.Command("git", "-C", repo, "init").Run())
+
+		r := evaluateAllInDir("rm -rf .", repo)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionDeny, r.decision)
+	})
+
 	t.Run("rm -fr denied", func(t *testing.T) {
 		r := evaluateAll("rm -fr dir/")
 		require.NotNil(t, r)
