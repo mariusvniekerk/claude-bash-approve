@@ -7,10 +7,17 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
+var recursiveRmStandardTempRoots = [...]string{
+	"/tmp",
+	"/var/tmp",
+	"/private/tmp",
+	"/private/var/tmp",
+}
+
 // resolveRecursiveRmDecision allows recursive removal only when every target
-// is an explicit strict descendant of the current repository. The pattern's
-// baseline deny remains in force for dynamic paths, globs, outside paths, and
-// attempts to remove the repository root itself.
+// is an explicit strict descendant of the current repository or a standard
+// temporary directory. The pattern's baseline deny remains in force for
+// dynamic paths, globs, outside paths, and attempts to remove an allowed root.
 func resolveRecursiveRmDecision(args []*syntax.Word, ctx evalContext) *result {
 	if ctx.cwd == "" || len(args) < 3 {
 		return nil
@@ -21,6 +28,9 @@ func resolveRecursiveRmDecision(args []*syntax.Word, ctx evalContext) *result {
 	for _, arg := range args[1:] {
 		literal := wordLiteralPathWithContext(arg, ctx)
 		if literal == "" {
+			return nil
+		}
+		if hasUnquotedRmTargetExpansion(arg) {
 			return nil
 		}
 		if parsingOptions {
@@ -34,7 +44,7 @@ func resolveRecursiveRmDecision(args []*syntax.Word, ctx evalContext) *result {
 			parsingOptions = false
 		}
 
-		if hasUnquotedGlob(arg) || !recursiveRmTargetInCurrentRepo(ctx.cwd, literal) {
+		if hasUnquotedGlob(arg) || !recursiveRmTargetInAllowedScope(ctx.cwd, literal) {
 			return nil
 		}
 		targets++
@@ -46,12 +56,17 @@ func resolveRecursiveRmDecision(args []*syntax.Word, ctx evalContext) *result {
 	return &result{decision: decisionAllow}
 }
 
-func recursiveRmTargetInCurrentRepo(cwd, target string) bool {
-	repoRoot := repoRootForCwd(cwd)
-	if repoRoot == "" {
-		return false
+func hasUnquotedRmTargetExpansion(word *syntax.Word) bool {
+	for _, part := range word.Parts {
+		switch part.(type) {
+		case *syntax.ParamExp, *syntax.CmdSubst:
+			return true
+		}
 	}
+	return false
+}
 
+func recursiveRmTargetInAllowedScope(cwd, target string) bool {
 	targetPath := target
 	if !filepath.IsAbs(targetPath) {
 		targetPath = filepath.Join(cwd, targetPath)
@@ -65,12 +80,31 @@ func recursiveRmTargetInCurrentRepo(cwd, target string) bool {
 		return false
 	}
 
-	rel, err := filepath.Rel(repoRoot, targetPath)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	repoRoot := repoRootForCwd(cwd)
+	if repoRoot != "" {
+		if targetPath == repoRoot {
+			return false
+		}
+		if recursiveRmTargetStrictlyBelow(repoRoot, targetPath) {
+			return true
+		}
+	}
+	for _, root := range recursiveRmStandardTempRoots {
+		resolvedRoot, err := resolveRecursiveRmTarget(root)
+		if err == nil && recursiveRmTargetStrictlyBelow(resolvedRoot, targetPath) {
+			return true
+		}
+	}
+	return false
+}
+
+func recursiveRmTargetStrictlyBelow(root, target string) bool {
+	if root == "" {
 		return false
 	}
-
-	return true
+	rel, err := filepath.Rel(root, target)
+	return err == nil && rel != "." && rel != ".." &&
+		!strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // resolveRecursiveRmTarget resolves every existing path component, then
