@@ -1673,7 +1673,7 @@ func TestNoOpinionDecision(t *testing.T) {
 
 	// --- shell destructive ops (deny) ---
 	t.Run("rm -rf denied", func(t *testing.T) {
-		r := evaluateAll("rm -rf /tmp/stuff")
+		r := evaluateAll("rm -rf /")
 		require.NotNil(t, r)
 		assert.Equal(t, "rm -r", r.reason)
 		assert.Equal(t, "deny", r.decision)
@@ -1696,6 +1696,80 @@ func TestNoOpinionDecision(t *testing.T) {
 		require.NotNil(t, r)
 		assert.Equal(t, "rm -r", r.reason)
 		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("rm -rf standard temporary descendants allowed", func(t *testing.T) {
+		repo := t.TempDir()
+		require.NoError(t, exec.Command("git", "-C", repo, "init").Run())
+
+		for _, target := range []string{
+			"/tmp/bash-approve-recursive-rm-test",
+			"/var/tmp/bash-approve-recursive-rm-test",
+			"/private/tmp/bash-approve-recursive-rm-test",
+			"/private/var/tmp/bash-approve-recursive-rm-test",
+		} {
+			r := evaluateAllInDir("rm -rf "+target, repo)
+			require.NotNil(t, r, target)
+			assert.Equal(t, decisionAllow, r.decision, target)
+		}
+	})
+
+	t.Run("rm -rf standard temporary boundaries remain denied", func(t *testing.T) {
+		repo := t.TempDir()
+		require.NoError(t, exec.Command("git", "-C", repo, "init").Run())
+
+		for _, command := range []string{
+			"rm -rf /tmp",
+			"rm -rf /var/tmp",
+			"rm -rf /private/tmp",
+			"rm -rf /private/var/tmp",
+			"rm -rf /tmp/bash-approve-*",
+			"rm -rf /tmp/bash-approve-safe /etc/bash-approve-unsafe",
+		} {
+			r := evaluateAllInDir(command, repo)
+			require.NotNil(t, r, command)
+			assert.Equal(t, decisionDeny, r.decision, command)
+		}
+	})
+
+	t.Run("rm -rf temporary symlink escape remains denied", func(t *testing.T) {
+		repo := t.TempDir()
+		require.NoError(t, exec.Command("git", "-C", repo, "init").Run())
+		tempRoot, err := os.MkdirTemp("/tmp", "bash-approve-rm-symlink.")
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, os.RemoveAll(tempRoot)) })
+		escape := filepath.Join(tempRoot, "escape")
+		require.NoError(t, os.Symlink("/", escape))
+
+		r := evaluateAllInDir("rm -rf "+escape, repo)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionDeny, r.decision)
+	})
+
+	t.Run("rm -rf repository root under temp remains denied", func(t *testing.T) {
+		repo, err := os.MkdirTemp("/tmp", "bash-approve-rm-repo.")
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, os.RemoveAll(repo)) })
+		require.NoError(t, exec.Command("git", "-C", repo, "init").Run())
+
+		r := evaluateAllInDir("rm -rf .", repo)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionDeny, r.decision)
+	})
+
+	t.Run("rm -rf unquoted static expansion remains denied", func(t *testing.T) {
+		repo := t.TempDir()
+		require.NoError(t, exec.Command("git", "-C", repo, "init").Run())
+
+		for _, command := range []string{
+			`targets='/tmp/bash-approve-safe /etc'; rm -rf $targets`,
+			`targets='/tmp/bash-approve-*'; rm -rf $targets`,
+			`args='-- /etc'; rm -rf $args /tmp/bash-approve-safe`,
+		} {
+			r := evaluateAllInDir(command, repo)
+			require.NotNil(t, r, command)
+			assert.Equal(t, decisionDeny, r.decision, command)
+		}
 	})
 
 	t.Run("rm -rf repository root remains denied", func(t *testing.T) {
@@ -1729,89 +1803,89 @@ func TestNoOpinionDecision(t *testing.T) {
 	// Quoting bypasses: shell decodes these to `rm -rf ...` at runtime,
 	// so the matcher must too. See main_test.go quoting cases below.
 	t.Run("rm with single-quoted flag denied", func(t *testing.T) {
-		r := evaluateAll("rm '-rf' /tmp/stuff")
+		r := evaluateAll("rm '-rf' /")
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 		assert.Contains(t, r.denyReason, "rm -r is banned")
 	})
 
 	t.Run("rm with double-quoted flag denied", func(t *testing.T) {
-		r := evaluateAll(`rm "-rf" /tmp/stuff`)
+		r := evaluateAll(`rm "-rf" /`)
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
 
 	t.Run("rm with ANSI-C-quoted flag denied", func(t *testing.T) {
-		r := evaluateAll(`rm $'-rf' /tmp/stuff`)
+		r := evaluateAll(`rm $'-rf' /`)
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
 
 	t.Run("rm with ANSI-C escape sequence in flag denied", func(t *testing.T) {
 		// $'\x2drf' decodes to -rf
-		r := evaluateAll(`rm $'\x2drf' /tmp/stuff`)
+		r := evaluateAll(`rm $'\x2drf' /`)
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
 
 	t.Run("backslash-escaped rm with -rf denied", func(t *testing.T) {
-		r := evaluateAll(`\rm -rf /tmp/stuff`)
+		r := evaluateAll(`\rm -rf /`)
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
 
 	t.Run("single-quoted rm command with -rf denied", func(t *testing.T) {
-		r := evaluateAll(`'rm' -rf /tmp/stuff`)
+		r := evaluateAll(`'rm' -rf /`)
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
 
 	t.Run("ANSI-C-quoted rm command with -rf denied", func(t *testing.T) {
-		r := evaluateAll(`$'rm' -rf /tmp/stuff`)
+		r := evaluateAll(`$'rm' -rf /`)
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
 
 	t.Run("concatenated rm with quoted suffix denied", func(t *testing.T) {
 		// r'm' decodes to rm
-		r := evaluateAll(`r'm' -rf /tmp/stuff`)
+		r := evaluateAll(`r'm' -rf /`)
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
 
 	t.Run("rm with echo cmd-subst flag denied", func(t *testing.T) {
-		r := evaluateAll(`rm $(echo -rf) /tmp/stuff`)
+		r := evaluateAll(`rm $(echo -rf) /`)
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
 
 	t.Run("rm with echo cmd-subst quoted flag denied", func(t *testing.T) {
-		r := evaluateAll(`rm $(echo '-rf') /tmp/stuff`)
+		r := evaluateAll(`rm $(echo '-rf') /`)
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
 
 	t.Run("rm with backtick echo flag denied", func(t *testing.T) {
-		r := evaluateAll("rm `echo -rf` /tmp/stuff")
+		r := evaluateAll("rm `echo -rf` /")
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
 
 	t.Run("rm with double-quoted echo cmd-subst denied", func(t *testing.T) {
-		r := evaluateAll(`rm "$(echo -rf)" /tmp/stuff`)
+		r := evaluateAll(`rm "$(echo -rf)" /`)
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
 
 	t.Run("rm with echo -n flag prefix in cmd-subst denied", func(t *testing.T) {
 		// echo -n suppresses newline; -rf is the actual arg
-		r := evaluateAll(`rm $(echo -n -rf) /tmp/stuff`)
+		r := evaluateAll(`rm $(echo -n -rf) /`)
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
 
 	t.Run("rm with nested echo cmd-subst denied", func(t *testing.T) {
-		r := evaluateAll(`rm $(echo $(echo -rf)) /tmp/stuff`)
+		r := evaluateAll(`rm $(echo $(echo -rf)) /`)
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
@@ -1872,7 +1946,7 @@ func TestNoOpinionDecision(t *testing.T) {
 	// whitespace fallback — its decoded whitespace is the IFS argv
 	// boundary bash would split on.
 	t.Run("rm with cmd-subst whitespace splits into argv denied", func(t *testing.T) {
-		r := evaluateAll(`rm $(echo -rf /tmp/x)`)
+		r := evaluateAll(`rm $(echo -rf /)`)
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
@@ -1887,20 +1961,20 @@ func TestNoOpinionDecision(t *testing.T) {
 
 	t.Run("rm with echo -e octal escape denied", func(t *testing.T) {
 		// echo -e '\055rf' decodes \055 as octal '-' → output "-rf"
-		r := evaluateAll(`rm $(echo -e '\055rf') /tmp/stuff`)
+		r := evaluateAll(`rm $(echo -e '\055rf') /`)
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
 
 	t.Run("rm with echo -e hex escape denied", func(t *testing.T) {
-		r := evaluateAll(`rm $(echo -e '\x2drf') /tmp/stuff`)
+		r := evaluateAll(`rm $(echo -e '\x2drf') /`)
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
 
 	t.Run("rm with echo -ne hex escape denied", func(t *testing.T) {
 		// -ne combines -n (no newline) and -e (interpret escapes)
-		r := evaluateAll(`rm $(echo -ne '\x2drf') /tmp/stuff`)
+		r := evaluateAll(`rm $(echo -ne '\x2drf') /`)
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
@@ -1932,13 +2006,13 @@ func TestNoOpinionDecision(t *testing.T) {
 
 	t.Run("rm with echo -Ee escape enabled denied", func(t *testing.T) {
 		// -E then -e: final state is enabled
-		r := evaluateAll(`rm $(echo -Ee '\055rf') /tmp/stuff`)
+		r := evaluateAll(`rm $(echo -Ee '\055rf') /`)
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
 
 	t.Run("rm with echo separate -E -e flags last wins denied", func(t *testing.T) {
-		r := evaluateAll(`rm $(echo -E -e '\055rf') /tmp/stuff`)
+		r := evaluateAll(`rm $(echo -E -e '\055rf') /`)
 		require.NotNil(t, r)
 		assert.Equal(t, "deny", r.decision)
 	})
