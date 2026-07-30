@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -95,7 +96,26 @@ func recursiveRmTargetInAllowedScope(cwd, target string) bool {
 			return true
 		}
 	}
+	runtimeRoot := recursiveRmRuntimeTempRoot()
+	if runtimeRoot == "" {
+		return false
+	}
+	resolvedRoot, err := resolveRecursiveRmTarget(runtimeRoot)
+	if err != nil || filepath.Dir(resolvedRoot) == resolvedRoot {
+		return false
+	}
+	if recursiveRmTargetStrictlyBelow(resolvedRoot, targetPath) {
+		return true
+	}
 	return false
+}
+
+func recursiveRmRuntimeTempRoot() string {
+	root := os.Getenv("TMPDIR")
+	if !filepath.IsAbs(root) {
+		return ""
+	}
+	return root
 }
 
 func recursiveRmTargetStrictlyBelow(root, target string) bool {

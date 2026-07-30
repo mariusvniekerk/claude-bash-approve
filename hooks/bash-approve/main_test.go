@@ -1714,6 +1714,43 @@ func TestNoOpinionDecision(t *testing.T) {
 		}
 	})
 
+	t.Run("rm -rf runtime TMPDIR descendant allowed", func(t *testing.T) {
+		repo := t.TempDir()
+		require.NoError(t, exec.Command("git", "-C", repo, "init").Run())
+		root := "/var/folders/bash-approve-tests/T"
+		t.Setenv("TMPDIR", root)
+
+		r := evaluateAllInDir("rm -rf "+filepath.Join(root, "middleman-e2e.123"), repo)
+		require.NotNil(t, r)
+		assert.Equal(t, decisionAllow, r.decision)
+	})
+
+	t.Run("rm -rf runtime TMPDIR boundaries remain denied", func(t *testing.T) {
+		repo := t.TempDir()
+		require.NoError(t, exec.Command("git", "-C", repo, "init").Run())
+		root := "/var/folders/bash-approve-tests/T"
+
+		for _, tc := range []struct {
+			name    string
+			tmpdir  string
+			command string
+		}{
+			{"root", root, "rm -rf " + root},
+			{"filesystem root", "/", "rm -rf /etc/bash-approve-safe"},
+			{"empty root", "", "rm -rf " + filepath.Join(root, "child")},
+			{"relative root", "var/folders/bash-approve-tests/T", "rm -rf " + filepath.Join(root, "child")},
+			{"repository root", repo, "rm -rf ."},
+			{"inline assignment", root, "TMPDIR=/etc rm -rf /etc/bash-approve-safe"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Setenv("TMPDIR", tc.tmpdir)
+				r := evaluateAllInDir(tc.command, repo)
+				require.NotNil(t, r)
+				assert.Equal(t, decisionDeny, r.decision)
+			})
+		}
+	})
+
 	t.Run("rm -rf standard temporary boundaries remain denied", func(t *testing.T) {
 		repo := t.TempDir()
 		require.NoError(t, exec.Command("git", "-C", repo, "init").Run())
