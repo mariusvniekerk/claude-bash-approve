@@ -43,10 +43,10 @@ Add subtests beside the existing standard-temporary-root cases. Use the literal 
 
 ```go
 t.Run("rm -rf runtime TMPDIR descendant allowed", func(t *testing.T) {
-	root := "/var/folders/bash-approve-tests/T"
-	t.Setenv("TMPDIR", root)
 	repo := t.TempDir()
 	require.NoError(t, exec.Command("git", "-C", repo, "init").Run())
+	root := "/var/folders/bash-approve-tests/T"
+	t.Setenv("TMPDIR", root)
 
 	r := evaluateAllInDir("rm -rf "+filepath.Join(root, "middleman-e2e.123"), repo)
 	require.NotNil(t, r)
@@ -60,15 +60,19 @@ Add one table covering the policy boundaries:
 t.Run("rm -rf runtime TMPDIR boundaries remain denied", func(t *testing.T) {
 	repo := t.TempDir()
 	require.NoError(t, exec.Command("git", "-C", repo, "init").Run())
+	root := "/var/folders/bash-approve-tests/T"
 
 	for _, tc := range []struct {
 		name    string
 		tmpdir  string
 		command string
 	}{
-		{"root", "/var/folders/bash-approve-tests/T", "rm -rf /var/folders/bash-approve-tests/T"},
-		{"relative root", "var/folders/bash-approve-tests/T", "rm -rf /var/folders/bash-approve-tests/T/child"},
+		{"root", root, "rm -rf " + root},
+		{"filesystem root", "/", "rm -rf /etc/bash-approve-safe"},
+		{"empty root", "", "rm -rf " + filepath.Join(root, "child")},
+		{"relative root", "var/folders/bash-approve-tests/T", "rm -rf " + filepath.Join(root, "child")},
 		{"repository root", repo, "rm -rf ."},
+		{"inline assignment", root, "TMPDIR=/etc rm -rf /etc/bash-approve-safe"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("TMPDIR", tc.tmpdir)
@@ -142,7 +146,8 @@ Build the branch binary into a mode-0700 scratch directory, send evaluator JSON 
 
 - an explicit descendant of the current absolute process `TMPDIR` is `allow`;
 - the `TMPDIR` root itself is `deny`;
-- `/var/folders` outside the current `TMPDIR` is `deny`.
+- `/var/folders` outside the current `TMPDIR` is `deny`; and
+- a process `TMPDIR` of `/` does not approve an `/etc` descendant.
 
 - [ ] **Step 6: Commit, push, open a PR, merge on green CI, and install**
 
