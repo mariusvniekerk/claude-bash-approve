@@ -13,7 +13,7 @@ deny decision.
 Treat an absolute, symlink-resolved `TMPDIR` from the hook process environment
 as one additional temporary root. Apply the same strict-descendant predicate
 used for fixed temporary roots. The root itself remains denied, and an unset,
-empty, or relative `TMPDIR` adds no trusted scope.
+empty, relative, or filesystem-root `TMPDIR` adds no trusted scope.
 
 The command text cannot widen the policy with an inline `TMPDIR=...`
 assignment: the resolver reads the hook process environment, not evaluated

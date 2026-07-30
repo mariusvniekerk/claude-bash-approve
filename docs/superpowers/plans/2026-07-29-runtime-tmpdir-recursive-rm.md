@@ -12,6 +12,7 @@
 
 - Only the hook process environment's `TMPDIR` is considered; inline shell assignments do not change the trusted root.
 - `TMPDIR` must be non-empty and absolute.
+- A `TMPDIR` that resolves to a filesystem root adds no trusted scope.
 - The resolved `TMPDIR` root itself remains denied; only strict descendants are allowed.
 - Repository roots remain denied even when `TMPDIR` points at the repository.
 - Existing literal, glob, expansion, mixed-target, and symlink-escape protections remain unchanged.
@@ -108,13 +109,19 @@ After checking the fixed roots in `recursiveRmTargetInAllowedScope`, resolve the
 
 ```go
 runtimeRoot := recursiveRmRuntimeTempRoot()
+if runtimeRoot == "" {
+	return false
+}
 resolvedRoot, err := resolveRecursiveRmTarget(runtimeRoot)
-if err == nil && recursiveRmTargetStrictlyBelow(resolvedRoot, targetPath) {
+if err != nil || filepath.Dir(resolvedRoot) == resolvedRoot {
+	return false
+}
+if recursiveRmTargetStrictlyBelow(resolvedRoot, targetPath) {
 	return true
 }
 ```
 
-The existing `recursiveRmTargetStrictlyBelow` empty-root guard keeps unset or empty `TMPDIR` fail-closed; the explicit absolute-path check rejects relative values before filesystem resolution.
+The explicit empty-root guard keeps unset or empty `TMPDIR` fail-closed before filesystem resolution; the absolute-path check rejects relative values at the same boundary.
 
 - [ ] **Step 4: Verify GREEN and regression safety**
 
