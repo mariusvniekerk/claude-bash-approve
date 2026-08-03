@@ -620,7 +620,6 @@ func TestEvaluate_Rejected(t *testing.T) {
 		{"ln plain", "ln target link"},
 		{"rm file", "rm important.txt"},
 		{"dd", "dd if=/dev/zero of=/dev/sda"},
-		{"chmod", "chmod 777 /etc/passwd"},
 		{"chown", "chown root:root file"},
 		{"sudo", "sudo apt install foo"},
 		{"apt install", "apt install foo"},

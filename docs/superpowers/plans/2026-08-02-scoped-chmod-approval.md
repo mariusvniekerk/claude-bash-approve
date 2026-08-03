@@ -14,7 +14,7 @@
 - Every target must be a strict descendant of the active repository/worktree, `/tmp`, `/var/tmp`, their `/private` aliases, or the absolute resolved process `TMPDIR`.
 - Allowed roots themselves remain no-opinion.
 - Every target must be static; unquoted globs, unproven expansions, symlink escapes, and mixed safe/unsafe lists remain no-opinion.
-- Only recognized no-argument options are accepted; `--reference` and unknown options remain no-opinion.
+- Only recognized no-argument options are accepted; `--reference`, recursive symlink-traversal flags, and unknown options remain no-opinion.
 - A literal octal or conventional symbolic mode is required.
 - `trap` policy is outside this change.
 - Follow TDD and observe telemetry command `84057` fail before production changes.
@@ -25,6 +25,7 @@
 
 - Create `hooks/bash-approve/chmod.go`: parse `chmod` options, mode, and targets, then resolve the scoped decision.
 - Create `hooks/bash-approve/chmod_test.go`: own focused allow and no-opinion behavior.
+- Modify `hooks/bash-approve/main_test.go`: move unsafe `chmod` coverage from unknown-command behavior to the new no-opinion boundary test.
 - Modify `hooks/bash-approve/rm.go`: give the shared static-expansion and target-scope helpers neutral names.
 - Modify `hooks/bash-approve/rules.go`: register `chmod` with a no-opinion baseline and the resolver.
 
@@ -35,6 +36,7 @@
 **Files:**
 - Create: `hooks/bash-approve/chmod.go`
 - Create: `hooks/bash-approve/chmod_test.go`
+- Modify: `hooks/bash-approve/main_test.go`
 - Modify: `hooks/bash-approve/rm.go`
 - Modify: `hooks/bash-approve/rules.go`
 
@@ -84,6 +86,7 @@ func TestChmodUnprovenTargetsRemainNoOpinion(t *testing.T) {
 		"chmod 700 " + filepath.Join(root, "*") ,
 		"target=$(date); chmod 700 \"$target\"",
 		"chmod --reference=/tmp/reference " + filepath.Join(root, "safe"),
+		"chmod -RL u+w " + filepath.Join(root, "safe"),
 	} {
 		r := evaluateAllInDir(command, repo)
 		require.NotNil(t, r, command)
@@ -114,6 +117,8 @@ NewPattern(`^chmod\b`, tags("chmod", "shell destructive", "shell"), WithDecision
 ```
 
 The empty baseline preserves current behavior whenever the resolver cannot prove safety.
+
+Remove the legacy `{"chmod", "chmod 777 /etc/passwd"}` row from `TestEvaluate_Rejected`; `TestChmodUnprovenTargetsRemainNoOpinion` now owns the stronger contract by asserting the recognized rule still returns an empty decision for an outside target.
 
 - [ ] **Step 4: Generalize the existing shared helpers**
 
@@ -196,7 +201,7 @@ func isChmodNoArgOption(value string) bool {
 		return false
 	}
 	for _, option := range value[1:] {
-		if !strings.ContainsRune("RfhvcHLP", option) {
+		if !strings.ContainsRune("Rfhvc", option) {
 			return false
 		}
 	}
@@ -224,4 +229,4 @@ Build the branch binary into a mode-0700 scratch directory and use a scratch `XD
 
 - [ ] **Step 8: Commit, push, open a PR, merge on green CI, and install**
 
-Stage only the design/plan, `chmod.go`, `chmod_test.go`, `rm.go`, and `rules.go`. Follow the mandatory commit workflow and use the `kenn-io/kit` SAFE Git runner for every Git command. Inspect the full branch history and every introduced blob, push, and open a rationale-first PR. If required CI passes, squash-merge it. Export the exact merged commit, retain a private backup of the installed runtime, install globally for Codex, and replay telemetry `84057` against the installed binary.
+Stage only the design/plan, `chmod.go`, `chmod_test.go`, `main_test.go`, `rm.go`, and `rules.go`. Follow the mandatory commit workflow and use the `kenn-io/kit` SAFE Git runner for every Git command. Inspect the full branch history and every introduced blob, push, and open a rationale-first PR. If required CI passes, squash-merge it. Export the exact merged commit, retain a private backup of the installed runtime, install globally for Codex, and replay telemetry `84057` against the installed binary.

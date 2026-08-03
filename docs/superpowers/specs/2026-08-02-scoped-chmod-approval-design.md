@@ -20,10 +20,10 @@ Add a dedicated `chmod` decision resolver. It may approve a command only when:
 - every option is a recognized no-argument `chmod` option.
 
 The rule's baseline remains no-opinion. A repository/worktree root or temporary
-root itself, unknown or argument-taking options such as `--reference`, globs,
-unproven expansions, symlink escapes, and mixed safe/unsafe target lists all
-remain no-opinion. The change does not approve `chmod` elsewhere and does not
-change `trap` policy.
+root itself, unknown or argument-taking options such as `--reference`,
+recursive symlink-traversal flags, globs, unproven expansions, symlink escapes,
+and mixed safe/unsafe target lists all remain no-opinion. The change does not
+approve `chmod` elsewhere and does not change `trap` policy.
 
 The resolver will reuse the recursive-rm path boundary rather than introduce a
 second path-prefix implementation. The shared helpers will receive neutral
