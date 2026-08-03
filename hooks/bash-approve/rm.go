@@ -31,7 +31,7 @@ func resolveRecursiveRmDecision(args []*syntax.Word, ctx evalContext) *result {
 		if literal == "" {
 			return nil
 		}
-		if hasUnquotedRmTargetExpansion(arg) {
+		if hasUnquotedPathExpansion(arg) {
 			return nil
 		}
 		if parsingOptions {
@@ -45,7 +45,7 @@ func resolveRecursiveRmDecision(args []*syntax.Word, ctx evalContext) *result {
 			parsingOptions = false
 		}
 
-		if hasUnquotedGlob(arg) || !recursiveRmTargetInAllowedScope(ctx.cwd, literal) {
+		if hasUnquotedGlob(arg) || !destructiveTargetInAllowedScope(ctx.cwd, literal) {
 			return nil
 		}
 		targets++
@@ -57,7 +57,7 @@ func resolveRecursiveRmDecision(args []*syntax.Word, ctx evalContext) *result {
 	return &result{decision: decisionAllow}
 }
 
-func hasUnquotedRmTargetExpansion(word *syntax.Word) bool {
+func hasUnquotedPathExpansion(word *syntax.Word) bool {
 	for _, part := range word.Parts {
 		switch part.(type) {
 		case *syntax.ParamExp, *syntax.CmdSubst:
@@ -67,7 +67,7 @@ func hasUnquotedRmTargetExpansion(word *syntax.Word) bool {
 	return false
 }
 
-func recursiveRmTargetInAllowedScope(cwd, target string) bool {
+func destructiveTargetInAllowedScope(cwd, target string) bool {
 	targetPath := target
 	if !filepath.IsAbs(targetPath) {
 		targetPath = filepath.Join(cwd, targetPath)
