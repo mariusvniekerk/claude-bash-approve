@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	gitcmd "go.kenn.io/kit/git/cmd"
 )
 
 // helper: evaluate with all patterns
@@ -50,6 +52,7 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"git ls-tree", "git ls-tree -r HEAD", "git read op"},
 		{"git -C path ls-tree", "git -C /tmp ls-tree -r upstream/main hooks/", "git read op"},
 		{"git rev-parse", "git rev-parse HEAD", "git read op"},
+		{"git merge-base", "git merge-base HEAD origin/main", "git read op"},
 		{"git describe", "git describe --tags", "git read op"},
 		{"git blame", "git blame main.go", "git read op"},
 		{"git grep", "git grep TODO", "git read op"},
@@ -576,6 +579,12 @@ func TestEvaluate_Approved(t *testing.T) {
 			assert.Equal(t, tt.reason, r.reason)
 		})
 	}
+}
+
+func TestGitMergeBaseDoesNotMatchWritePattern(t *testing.T) {
+	cfg := Config{Enabled: []string{"git write op"}, Disabled: []string{"git read op"}}
+	r := Evaluate("git merge-base HEAD origin/main", cfg, evalContext{})
+	assert.Nil(t, r)
 }
 
 func TestEvaluate_StaticShellCommand(t *testing.T) {
@@ -2459,6 +2468,21 @@ func reasonOrEmpty(r *result) string {
 	return r.reason
 }
 
+func TestGitOutputIgnoresGlobalAliases(t *testing.T) {
+	xdgConfig := t.TempDir()
+	configDir := filepath.Join(xdgConfig, "git")
+	require.NoError(t, os.MkdirAll(configDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(configDir, "config"),
+		[]byte("[alias]\n\tbashapprove-probe = !printf compromised\n"),
+		0o600,
+	))
+	t.Setenv("XDG_CONFIG_HOME", xdgConfig)
+
+	_, err := gitOutput(t.TempDir(), "bashapprove-probe")
+	require.Error(t, err)
+}
+
 func initGitRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
@@ -2473,12 +2497,9 @@ func initGitRepo(t *testing.T) string {
 
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = envWithoutGitVars()
-	out, err := cmd.CombinedOutput()
-	require.NoErrorf(t, err, "git %v failed: %s", args, string(out))
-	return string(out)
+	stdout, stderr, err := gitcmd.New().Run(context.Background(), dir, nil, args...)
+	require.NoErrorf(t, err, "git %v failed: %s", args, string(stderr))
+	return string(stdout)
 }
 
 func mustMarshalJSON(t *testing.T, value any) json.RawMessage {

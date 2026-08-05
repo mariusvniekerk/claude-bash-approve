@@ -123,6 +123,10 @@ func TestXargsReadOnlyPipelineCanAppendToAllowedCommands(t *testing.T) {
 			cmd:  `git diff --name-only --diff-filter=U | grep -v -e '^frontend/' -e '^README\.md' | tr '\n' '\0' | xargs -0 git checkout --theirs -- && git diff --name-only --diff-filter=U | grep -v -e '^frontend/' -e '^README\.md' | tr '\n' '\0' | xargs -0 git add -- && git diff --name-only --diff-filter=U`,
 		},
 		{
+			name: "telemetry 84177 merge-base pipeline",
+			cmd:  `git fetch origin main && printf 'origin/main ' && git rev-parse --short origin/main && printf 'merge-base ' && git merge-base HEAD origin/main | xargs git rev-parse --short && printf 'head ' && git rev-parse --short HEAD`,
+		},
+		{
 			name: "git read pipeline to git add",
 			cmd:  `git diff --name-only --diff-filter=U | grep -v -e '^frontend/' | xargs git add --`,
 		},

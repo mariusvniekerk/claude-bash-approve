@@ -1,11 +1,12 @@
 package main
 
 import (
+	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
+	gitcmd "go.kenn.io/kit/git/cmd"
 	"mvdan.cc/sh/v3/syntax"
 )
 
@@ -327,26 +328,11 @@ func pathInCurrentRepoFamily(cwd, target string) bool {
 }
 
 func gitOutput(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = envWithoutGitVars()
-	out, err := cmd.Output()
+	out, err := gitcmd.New().Output(context.Background(), dir, args...)
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
-}
-
-func envWithoutGitVars() []string {
-	env := make([]string, 0, len(os.Environ()))
-	for _, entry := range os.Environ() {
-		key, _, _ := strings.Cut(entry, "=")
-		if strings.HasPrefix(key, "GIT_") {
-			continue
-		}
-		env = append(env, entry)
-	}
-	return env
 }
 
 func gitResolvedPath(dir string, args ...string) (string, error) {
