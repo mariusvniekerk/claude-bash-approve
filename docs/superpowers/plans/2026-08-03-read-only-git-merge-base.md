@@ -8,7 +8,7 @@
 
 **Architecture:** Keep Git classification in ordered evaluator patterns, but require an exact subcommand terminator so a hyphenated read command cannot inherit a shorter write command's policy. Keep the repository-probe function boundary and replace its subprocess implementation with gitcmd.Runner.
 
-**Tech Stack:** Go 1.25, mvdan.cc/sh/v3, testify, go.kenn.io/kit/git/cmd v0.17.1, SQLite telemetry, prek, golangci-lint.
+**Tech Stack:** Go 1.26.3, mvdan.cc/sh/v3, testify, go.kenn.io/kit/git/cmd v0.17.1, SQLite telemetry, prek, golangci-lint.
 
 ## Global Constraints
 
@@ -133,7 +133,9 @@ cd hooks/bash-approve
 go get go.kenn.io/kit/git/cmd@v0.17.1
 ~~~
 
-Expected: go.mod and go.sum record go.kenn.io/kit v0.17.1.
+Expected: go.mod and go.sum record go.kenn.io/kit v0.17.1. Because every
+published kit release requires Go 1.26.3 and kit's module graph requires newer
+modernc SQLite, libc, and x/sys minimums, accept those MVS upgrades together.
 
 - [ ] **Step 4: Replace production Git execution**
 
