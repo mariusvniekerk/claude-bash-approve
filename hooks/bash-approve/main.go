@@ -2106,6 +2106,9 @@ func evaluate(cmd string, ctx evalContext, wrapperPats []pattern, commandPats []
 
 	ctx.wrapperPats = wrapperPats
 	ctx.commandPats = commandPats
+	if r, handled := evaluateGuardedTestHarness(file.Stmts, ctx, wrapperPats, commandPats); handled {
+		return r
+	}
 	return mergeStmtResults(file.Stmts, ctx, wrapperPats, commandPats)
 }
 
