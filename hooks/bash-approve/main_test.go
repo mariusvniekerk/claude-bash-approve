@@ -50,6 +50,7 @@ func TestEvaluate_Approved(t *testing.T) {
 		{"git ls-tree", "git ls-tree -r HEAD", "git read op"},
 		{"git -C path ls-tree", "git -C /tmp ls-tree -r upstream/main hooks/", "git read op"},
 		{"git rev-parse", "git rev-parse HEAD", "git read op"},
+		{"git merge-base", "git merge-base HEAD origin/main", "git read op"},
 		{"git describe", "git describe --tags", "git read op"},
 		{"git blame", "git blame main.go", "git read op"},
 		{"git grep", "git grep TODO", "git read op"},
@@ -576,6 +577,12 @@ func TestEvaluate_Approved(t *testing.T) {
 			assert.Equal(t, tt.reason, r.reason)
 		})
 	}
+}
+
+func TestGitMergeBaseDoesNotMatchWritePattern(t *testing.T) {
+	cfg := Config{Enabled: []string{"git write op"}, Disabled: []string{"git read op"}}
+	r := Evaluate("git merge-base HEAD origin/main", cfg, evalContext{})
+	assert.Nil(t, r)
 }
 
 func TestEvaluate_StaticShellCommand(t *testing.T) {

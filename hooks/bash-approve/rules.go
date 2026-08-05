@@ -122,7 +122,7 @@ func wrapperPatterns() []pattern {
 func commandPatterns() []pattern {
 	return []pattern{
 		// git
-		NewPattern(`^git\s+(-C\s+\S+\s+)?(diff|log|status|show|branch|stash\s+list|bisect|worktree\s+list|fetch|ls-files|ls-remote|ls-tree|rev-parse|describe|blame|grep|check-ignore|shortlog|name-rev|cat-file)\b`, tags("git read op", "git")),
+		NewPattern(`^git\s+(-C\s+\S+\s+)?(diff|log|status|show|branch|stash\s+list|bisect|worktree\s+list|fetch|ls-files|ls-remote|ls-tree|rev-parse|merge-base|describe|blame|grep|check-ignore|shortlog|name-rev|cat-file)\b`, tags("git read op", "git")),
 		// git destructive ops — blocked by default (matches before write ops)
 		NewPattern(`^git\s+(-C\s+\S+\s+)?stash\b`, tags("git stash", "git destructive", "git"), WithDecision("deny"),
 			WithDenyReason("BLOCKED: git stash is banned. It destroys work and causes merge conflicts. Make targeted edits instead.")),
@@ -140,7 +140,7 @@ func commandPatterns() []pattern {
 			WithDenyReason("BLOCKED: git push --no-verify is banned. Do not bypass pre-push hooks.")),
 		NewPattern(`^git\s+(-C\s+\S+\s+)?config\b.*(^|\s)core\.worktree(\s|$)`, tags("git config core.worktree", "git destructive", "git"), WithDecision("deny"),
 			WithDenyReason("BLOCKED: git config core.worktree is forbidden. It can make Git resolve the wrong working tree.")),
-		NewPattern(`^git\s+(-C\s+\S+\s+)?(add|checkout|cherry-pick|commit|merge|pull|rebase|restore|switch|remote|config|rerere|worktree)\b`, tags("git write op", "git")),
+		NewPattern(`^git\s+(-C\s+\S+\s+)?(add|checkout|cherry-pick|commit|merge|pull|rebase|restore|switch|remote|config|rerere|worktree)(?:\s|$)`, tags("git write op", "git")),
 		NewPattern(
 			`^git\s+(-C\s+\S+\s+)?tag(?:\s*$|\s+(?:-l(?:\s|$)|-n\d*(?:\s|$)|-i(?:\s|$)|--(?:list|ignore-case|no-column|omit-empty)(?:\s|$)|--(?:contains|no-contains|points-at|merged|no-merged|sort|format|column|color)(?:=|\s|$)))`,
 			tags("git read op", "git"),
