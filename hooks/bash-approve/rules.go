@@ -114,6 +114,7 @@ func wrapperPatterns() []pattern {
 		NewPattern(`^bundle\s+exec\s+`, tags("bundle exec", "wrapper")),
 		NewPattern(`^rtk\s+proxy\s+`, tags("rtk proxy", "wrapper")),
 		NewPattern(`^command\s+`, tags("command", "wrapper")),
+		NewPattern(`^xcrun\s+`, tags("xcrun", "wrapper")),
 		NewPattern(`^(\./|\.\./)*node_modules/\.bin/`, tags("node_modules/.bin", "wrapper")),
 		NewPattern(`^/[^\s]+/`, tags("absolute path", "wrapper"), WithWrapperValidator(isSafeAbsolutePath)),
 	}
@@ -273,6 +274,9 @@ func commandPatterns() []pattern {
 		NewPattern(`^nilaway\b`, tags("nilaway", "go")),
 		NewPattern(`^(\./)?scripts/nilaway-changed-packages\.sh\b`, tags("nilaway", "go")),
 		NewPattern(`^bash\s+scripts/nilaway_changed_packages_test\.sh\b`, tags("nilaway", "go")),
+
+		// swift
+		NewPattern(`^swift\s+(build|test)\b`, tags("swift")),
 
 		// gcloud (Google Cloud CLI)
 		NewPattern(`^gcloud\s+logging\s+read\b`, tags("gcloud logging", "gcloud")),
