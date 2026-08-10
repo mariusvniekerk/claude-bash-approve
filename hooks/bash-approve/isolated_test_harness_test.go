@@ -52,6 +52,7 @@ func TestGuardedIsolatedTestHarnessTelemetry(t *testing.T) {
 
 func TestGeneralGuardedHarnessTelemetry(t *testing.T) {
 	t.Setenv("HOME", "/Users/mariusvniekerk")
+	t.Setenv("TMPDIR", "/var/folders/p_/xgk1mhb53y17p5gbndxpdhv40000gn/T")
 
 	tests := []struct {
 		name    string
@@ -193,6 +194,8 @@ func TestGuardedIsolatedTestHarnessRejectsBoundaryMutations(t *testing.T) {
 }
 
 func TestGuardedHarnessPropagatesEnvironmentAndRunnerDecisions(t *testing.T) {
+	t.Setenv("HOME", "/Users/mariusvniekerk")
+
 	tests := []struct {
 		name     string
 		old      string
