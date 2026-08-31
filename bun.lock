@@ -6,8 +6,8 @@
       "devDependencies": {
         "@opencode-ai/plugin": "^1.4.1",
         "@types/node": "^25.6.0",
-        "vite": "catalog:",
-        "vite-plus": "catalog:",
+        "vite": "npm:@voidzero-dev/vite-plus-core@0.2.4",
+        "vite-plus": "0.2.4",
       },
     },
     "opencode-tester": {
@@ -31,7 +31,7 @@
     },
   },
   "overrides": {
-    "vite": "catalog:",
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.2.4",
   },
   "catalog": {
     "vite": "npm:@voidzero-dev/vite-plus-core@0.2.4",

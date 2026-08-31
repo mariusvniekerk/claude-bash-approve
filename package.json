@@ -4,25 +4,24 @@
     "opencode-tester",
     "packages/pi-bash-approve"
   ],
+  "pi": {
+    "extensions": [
+      "./packages/pi-bash-approve/extensions/index.ts"
+    ]
+  },
   "scripts": {
     "typecheck": "node node_modules/vite-plus/bin/vp check --no-fmt --no-lint"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "^1.4.1",
     "@types/node": "^25.6.0",
-    "vite": "catalog:",
-    "vite-plus": "catalog:"
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.2.4",
+    "vite-plus": "0.2.4"
   },
   "overrides": {
-    "vite": "catalog:"
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.2.4"
   },
-  "devEngines": {
-    "packageManager": {
-      "name": "bun",
-      "version": "1.3.14",
-      "onFail": "download"
-    }
-  },
+  "packageManager": "bun@1.3.14",
   "catalog": {
     "vite": "npm:@voidzero-dev/vite-plus-core@0.2.4",
     "vite-plus": "0.2.4"
