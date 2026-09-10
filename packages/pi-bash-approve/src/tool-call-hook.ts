@@ -20,6 +20,7 @@ export function createProtectedToolCallHandler(
   runRuntimeImpl: typeof runRuntime = runRuntime,
   options?: {
     shouldBypass?: () => boolean;
+    isDiscoveredSkillRead?: (filePath: string, cwd: string) => boolean;
   },
 ) {
   return async (
@@ -30,6 +31,13 @@ export function createProtectedToolCallHandler(
       return undefined;
     }
     if (!isProtectedToolName(event.toolName)) {
+      return undefined;
+    }
+    if (
+      event.toolName === "read" &&
+      typeof event.input.path === "string" &&
+      options?.isDiscoveredSkillRead?.(event.input.path, ctx.cwd)
+    ) {
       return undefined;
     }
 

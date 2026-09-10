@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { createDiscoveredSkillReadPolicy } from "../src/discovered-skill-reads";
 import { createExecutionResolver } from "../src/execution-resolver";
 import { createProtectedToolCallHandler } from "../src/tool-call-hook";
 
@@ -16,6 +17,7 @@ const extensionDir = path.dirname(fileURLToPath(import.meta.url));
 export default function (pi: ExtensionAPI) {
   const packageDir = path.resolve(extensionDir, "..");
   const resolveExecution = createExecutionResolver(packageDir);
+  const discoveredSkillReads = createDiscoveredSkillReadPolicy();
   let bypassProtection = false;
 
   pi.registerFlag("no-bash-approve", {
@@ -26,9 +28,21 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", () => {
     bypassProtection = pi.getFlag("no-bash-approve") === true;
+    discoveredSkillReads.clear();
   });
 
-  pi.on("tool_call", createProtectedToolCallHandler(resolveExecution, undefined, {
-    shouldBypass: () => bypassProtection,
-  }));
+  pi.on("before_agent_start", (event) => {
+    discoveredSkillReads.refresh(
+      event.systemPromptOptions.skills ?? [],
+      event.systemPromptOptions.cwd,
+    );
+  });
+
+  pi.on(
+    "tool_call",
+    createProtectedToolCallHandler(resolveExecution, undefined, {
+      shouldBypass: () => bypassProtection,
+      isDiscoveredSkillRead: (filePath, cwd) => discoveredSkillReads.allows(filePath, cwd),
+    }),
+  );
 }
