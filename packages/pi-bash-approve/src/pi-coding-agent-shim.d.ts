@@ -9,6 +9,25 @@ declare module "@mariozechner/pi-coding-agent" {
     signal?: AbortSignal;
   };
 
+  export type Skill = {
+    name: string;
+    description: string;
+    filePath: string;
+    baseDir: string;
+    sourceInfo: unknown;
+    disableModelInvocation: boolean;
+  };
+
+  export type BeforeAgentStartEvent = {
+    type: "before_agent_start";
+    prompt: string;
+    systemPrompt: string;
+    systemPromptOptions: {
+      cwd: string;
+      skills?: Skill[];
+    };
+  };
+
   export type ToolCallEvent = {
     type: "tool_call";
     toolCallId: string;
@@ -24,10 +43,11 @@ declare module "@mariozechner/pi-coding-agent" {
   export type ExtensionAPI = {
     on(
       event: "session_start",
-      handler: (
-        event: unknown,
-        ctx: ExtensionContext,
-      ) => Promise<void> | void,
+      handler: (event: unknown, ctx: ExtensionContext) => Promise<void> | void,
+    ): void;
+    on(
+      event: "before_agent_start",
+      handler: (event: BeforeAgentStartEvent, ctx: ExtensionContext) => Promise<void> | void,
     ): void;
     on(
       event: "tool_call",
@@ -36,17 +56,23 @@ declare module "@mariozechner/pi-coding-agent" {
         ctx: ExtensionContext,
       ) => Promise<ToolCallEventResult | undefined> | ToolCallEventResult | undefined,
     ): void;
-    registerFlag(name: string, options: {
-      description?: string;
-      type: "boolean" | "string";
-      default?: boolean | string;
-    }): void;
+    registerFlag(
+      name: string,
+      options: {
+        description?: string;
+        type: "boolean" | "string";
+        default?: boolean | string;
+      },
+    ): void;
     getFlag(name: string): boolean | string | undefined;
     registerTool(tool: any): void;
-    registerCommand(name: string, options: {
-      description: string;
-      handler(args: string, ctx: any): Promise<void> | void;
-    }): void;
+    registerCommand(
+      name: string,
+      options: {
+        description: string;
+        handler(args: string, ctx: any): Promise<void> | void;
+      },
+    ): void;
   };
 
   export function createBashTool(cwd: string): any;

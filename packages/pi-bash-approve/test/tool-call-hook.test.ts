@@ -56,6 +56,36 @@ test("bypasses protection when the no-bash-approve flag is active", async () => 
   expect(calls).toEqual([]);
 });
 
+test("bypasses runtime for the current discovered skill entry read", async () => {
+  const calls: string[] = [];
+  const handler = createProtectedToolCallHandler(
+    async () => {
+      calls.push("resolve");
+      return { config: {}, runtimePath: "/runtime" };
+    },
+    async () => {
+      calls.push("runtime");
+      return { version: 1, kind: "decision", tool: "read", decision: "noop" };
+    },
+    {
+      isDiscoveredSkillRead: (filePath) => filePath === "/opt/pi/skills/example/SKILL.md",
+    },
+  );
+
+  const result = await handler(
+    {
+      type: "tool_call",
+      toolCallId: "1",
+      toolName: "read",
+      input: { path: "/opt/pi/skills/example/SKILL.md" },
+    },
+    baseCtx,
+  );
+
+  expect(result).toBeUndefined();
+  expect(calls).toEqual([]);
+});
+
 test("bypasses runtime when config is disabled", async () => {
   const calls: string[] = [];
   const handler = createProtectedToolCallHandler(
@@ -102,7 +132,12 @@ test("allows protected tool calls when the runtime returns allow", async () => {
   );
 
   const result = await handler(
-    { type: "tool_call", toolCallId: "1", toolName: "grep", input: { pattern: "todo", path: "src" } },
+    {
+      type: "tool_call",
+      toolCallId: "1",
+      toolName: "grep",
+      input: { pattern: "todo", path: "src" },
+    },
     baseCtx,
   );
 
@@ -113,7 +148,16 @@ test("prompts on noop and blocks when the user rejects", async () => {
   const prompts: string[] = [];
   const handler = createProtectedToolCallHandler(
     async () => ({ config: {}, runtimePath: "/runtime" }),
-    async () => ({ version: 1, kind: "decision", tool: "read", decision: "noop", reason: "outside repo" }),
+    async () => ({
+      version: 1,
+      kind: "decision",
+      tool: "read",
+      decision: "noop",
+      reason: "outside repo",
+    }),
+    {
+      isDiscoveredSkillRead: () => false,
+    },
   );
 
   const result = await handler(
@@ -139,7 +183,13 @@ test("prompts on noop and blocks when the user rejects", async () => {
 test("blocks noop decisions without UI", async () => {
   const handler = createProtectedToolCallHandler(
     async () => ({ config: {}, runtimePath: "/runtime" }),
-    async () => ({ version: 1, kind: "decision", tool: "ls", decision: "noop", reason: "outside repo" }),
+    async () => ({
+      version: 1,
+      kind: "decision",
+      tool: "ls",
+      decision: "noop",
+      reason: "outside repo",
+    }),
   );
 
   const result = await handler(

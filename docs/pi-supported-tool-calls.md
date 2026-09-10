@@ -17,6 +17,10 @@ These are pi-native read-style boundary checks built on the same repo/worktree m
 - `find` — effective search root must stay inside the current repo/worktree boundary
 - `ls` — effective target path must stay inside the current repo/worktree boundary
 
+Before each agent run, the extension also reads Pi's structured skill metadata. It permits `read`
+for the exact visible skill entry files in that metadata. The exception does not cover other files
+in a skill directory or any other out-of-repo tool call.
+
 ## Not supported yet
 
 The pi package does **not** currently protect:
@@ -39,12 +43,14 @@ The Go runtime emits one of four decisions:
 Pi is not a hook chain, so `noop` does **not** fall through to a later permission hook. The pi package maps decisions like this:
 
 ### Interactive / RPC modes
+
 - `allow` → execute
 - `deny` → block
 - `ask` → prompt
 - `noop` → prompt
 
 ### Non-UI modes
+
 - `allow` → execute
 - `deny` → block
 - `ask` → block
