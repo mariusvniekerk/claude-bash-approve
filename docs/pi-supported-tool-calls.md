@@ -40,20 +40,20 @@ The Go runtime emits one of four decisions:
 - `ask`
 - `noop`
 
-Pi is not a hook chain, so `noop` does **not** fall through to a later permission hook. The pi package maps decisions like this:
+The pi package treats `noop` as approval to execute without interrupting the user. It maps decisions like this:
 
 ### Interactive / RPC modes
 
 - `allow` → execute
 - `deny` → block
 - `ask` → prompt
-- `noop` → prompt
+- `noop` → execute without a prompt
 
 ### Non-UI modes
 
 - `allow` → execute
 - `deny` → block
 - `ask` → block
-- `noop` → block
+- `noop` → execute
 
-Runtime failures and contract parsing failures also fail closed and block execution.
+This means an out-of-repository `read`, `grep`, `find`, or `ls` call that the runtime classifies as `noop` executes without confirmation. Explicit `deny` decisions still block. Runtime failures and contract parsing failures also fail closed and block execution.

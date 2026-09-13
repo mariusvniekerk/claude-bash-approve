@@ -8,18 +8,18 @@ export type NormalizedDecision =
 /**
  * Translate the Go runtime's hook-style decisions into concrete pi behavior.
  *
- * `noop` means "fall through" in Claude hook chains, but pi has no later approval hook to defer
- * to, so both `noop` and `ask` become an explicit prompt when UI exists and a block otherwise.
+ * `noop` means the runtime has no objection, so pi executes without prompting. An explicit
+ * `ask` still requires UI confirmation and blocks when no UI is available.
  */
 export function normalizeDecision(output: PiRuntimeOutput | PiRuntimeDecisionOutput, options: { hasUI: boolean }): NormalizedDecision {
   if (output.kind === "error") return { kind: "block" };
   switch (output.decision) {
     case "allow":
+    case "noop":
       return { kind: "execute" };
     case "deny":
       return { kind: "block" };
     case "ask":
-    case "noop":
       return options.hasUI ? { kind: "prompt" } : { kind: "block" };
   }
 }
