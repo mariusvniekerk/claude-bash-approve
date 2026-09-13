@@ -1,126 +1,179 @@
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, mkdir, realpath, writeFile, rm } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  mkdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test, expect } from "bun:test";
 
 type RpcMessage = Record<string, unknown>;
 
-test("real pi rpc emits approval confirm for protected out-of-bounds read", async () => {
+test("real pi rpc preserves noop, deny, and ask boundaries", async () => {
   const piCommand = findPiCommand();
   if (!piCommand) {
     console.warn("Skipping rpc e2e test: pi binary is not available");
     return;
   }
+
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "pi-bash-approve-rpc-e2e-"));
   const repoDir = path.join(tempRoot, "repo");
+  const scriptsDir = path.join(repoDir, "scripts");
   const outsideFile = path.join(tempRoot, "outside.txt");
+  const interactiveSentinel = path.join(tempRoot, "noop-interactive.txt");
+  const headlessSentinel = path.join(tempRoot, "noop-headless.txt");
+  const denySentinel = path.join(tempRoot, "deny-executed.txt");
   const agentDir = path.join(tempRoot, "agent-home");
+  const stateDir = path.join(agentDir, "state");
+  const fakeBinDir = path.join(tempRoot, "fake-bin");
+  const runtimeDir = path.join(tempRoot, "runtime");
+  const runtimeBinary = path.join(runtimeDir, "approve-bash");
+  const runtimeShim = path.join(runtimeDir, "run-pi-runtime.sh");
+  const gitConfig = path.join(tempRoot, "gitconfig");
   const projectConfigDir = path.join(repoDir, ".pi");
-  await mkdir(repoDir, { recursive: true });
+  const packageRoot = path.resolve(import.meta.dir, "../../..");
+  const runtimeSourceDir = path.join(packageRoot, "hooks", "bash-approve");
+
+  await mkdir(scriptsDir, { recursive: true });
   await mkdir(agentDir, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await mkdir(fakeBinDir, { recursive: true });
+  await mkdir(runtimeDir, { recursive: true });
   await mkdir(projectConfigDir, { recursive: true });
-  await writeFile(outsideFile, "top secret\n", "utf8");
-  await writeFile(path.join(projectConfigDir, "bash-approve.json"), JSON.stringify({ enabled: true }), "utf8");
-  await run("git", ["init", "-q"], repoDir);
+  await writeFile(gitConfig, "", "utf8");
+  await writeFile(outsideFile, "outside fixture\n", "utf8");
+  await writeFile(
+    path.join(scriptsDir, "project-task"),
+    "#!/bin/sh\nprintf 'executed\\n' > \"$1\"\n",
+    "utf8",
+  );
+  await chmod(path.join(scriptsDir, "project-task"), 0o755);
+  await writeFile(
+    path.join(fakeBinDir, "go"),
+    "#!/bin/sh\nprintf 'executed\\n' > \"$DENY_SENTINEL\"\n",
+    "utf8",
+  );
+  await chmod(path.join(fakeBinDir, "go"), 0o755);
+
+  const gitEnvironment = isolatedEnvironment({
+    GIT_CONFIG_GLOBAL: gitConfig,
+    GIT_CONFIG_NOSYSTEM: "1",
+  });
+  await run(
+    "go",
+    ["build", "-buildvcs=false", "-o", runtimeBinary, "."],
+    runtimeSourceDir,
+    gitEnvironment,
+  );
+  await writeFile(
+    runtimeShim,
+    `#!/bin/sh\nexec ${JSON.stringify(runtimeBinary)} --pi "$@"\n`,
+    "utf8",
+  );
+  await chmod(runtimeShim, 0o755);
+  await run("git", ["init", "-q"], repoDir, gitEnvironment);
+  await writeFile(
+    path.join(projectConfigDir, "bash-approve.json"),
+    JSON.stringify({ enabled: true, runtimePath: runtimeShim }),
+    "utf8",
+  );
   const effectiveRepoDir = await realpath(repoDir);
 
   const client = startRpcPi({
     piCommand,
     cwd: repoDir,
     agentDir,
+    stateDir,
+    gitConfig,
     extensions: [
       path.resolve(import.meta.dir, "../extensions/index.ts"),
       path.resolve(import.meta.dir, "./fixtures/rpc-e2e-harness.ts"),
     ],
+    env: {
+      DENY_SENTINEL: denySentinel,
+      PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+    },
   });
 
   try {
-    const response = await client.send({
-      id: "prompt-1",
+    const interactiveCommand = `scripts/project-task ${JSON.stringify(interactiveSentinel)}`;
+    const interactiveResponse = await client.send({
+      id: "noop-interactive",
+      type: "prompt",
+      message: `/pi-bash-approve-bash-e2e ${interactiveCommand}`,
+    });
+    expect(interactiveResponse).toMatchObject({
+      id: "noop-interactive",
+      type: "response",
+      command: "prompt",
+      success: true,
+    });
+    await client.waitFor((message) => (
+      message.type === "extension_ui_request"
+      && message.method === "notify"
+      && String(message.message).includes(interactiveCommand)
+    ));
+    expect(await readFile(interactiveSentinel, "utf8")).toBe("executed\n");
+    expect(client.confirmRequests()).toHaveLength(0);
+
+    const headlessCommand = `scripts/project-task ${JSON.stringify(headlessSentinel)}`;
+    await client.send({
+      id: "noop-headless",
+      type: "prompt",
+      message: `/pi-bash-approve-bash-headless-e2e ${headlessCommand}`,
+    });
+    await client.waitFor((message) => (
+      message.type === "extension_ui_request"
+      && message.method === "notify"
+      && String(message.message).includes(headlessCommand)
+    ));
+    expect(await readFile(headlessSentinel, "utf8")).toBe("executed\n");
+    expect(client.confirmRequests()).toHaveLength(0);
+
+    await client.send({
+      id: "noop-read",
       type: "prompt",
       message: `/pi-bash-approve-read-e2e ${outsideFile}`,
     });
-    expect(response).toMatchObject({
-      id: "prompt-1",
-      type: "response",
-      command: "prompt",
-      success: true,
-    });
+    const readNotify = await client.waitFor((message) => (
+      message.type === "extension_ui_request"
+      && message.method === "notify"
+      && String(message.message).includes("read succeeded: outside fixture")
+    ));
+    expect(String(readNotify.message)).toContain("outside fixture");
+    expect(client.confirmRequests()).toHaveLength(0);
 
-    const confirm = await client.waitFor(
-      (message) => message.type === "extension_ui_request" && message.method === "confirm",
-    );
-
-    expect(confirm.title).toBe("Allow out-of-bounds tool access?");
-    expect(String(confirm.message)).toContain("Tool:\nread");
-    expect(String(confirm.message)).toContain(`Target:\n${outsideFile}`);
-    expect(String(confirm.message)).toContain(`Working directory:\n${effectiveRepoDir}`);
-
-    client.write({
-      type: "extension_ui_response",
-      id: String(confirm.id),
-      confirmed: false,
-    });
-
-    const notify = await client.waitFor(
-      (message) => message.type === "extension_ui_request" && message.method === "notify",
-    );
-    expect(String(notify.message)).toContain("blocked by user");
-  } finally {
-    await client.close();
-    await rm(tempRoot, { recursive: true, force: true });
-  }
-});
-
-test("real pi rpc emits approval confirm for protected bash ask command", async () => {
-  const piCommand = findPiCommand();
-  if (!piCommand) {
-    console.warn("Skipping rpc e2e test: pi binary is not available");
-    return;
-  }
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "pi-bash-approve-rpc-e2e-bash-"));
-  const repoDir = path.join(tempRoot, "repo");
-  const agentDir = path.join(tempRoot, "agent-home");
-  const projectConfigDir = path.join(repoDir, ".pi");
-  await mkdir(repoDir, { recursive: true });
-  await mkdir(agentDir, { recursive: true });
-  await mkdir(projectConfigDir, { recursive: true });
-  await writeFile(path.join(projectConfigDir, "bash-approve.json"), JSON.stringify({ enabled: true }), "utf8");
-  await run("git", ["init", "-q"], repoDir);
-  const effectiveRepoDir = await realpath(repoDir);
-
-  const client = startRpcPi({
-    piCommand,
-    cwd: repoDir,
-    agentDir,
-    extensions: [
-      path.resolve(import.meta.dir, "../extensions/index.ts"),
-      path.resolve(import.meta.dir, "./fixtures/rpc-e2e-harness.ts"),
-    ],
-  });
-
-  const command = "git tag v1.0.0";
-  try {
-    const response = await client.send({
-      id: "prompt-bash-1",
+    await client.send({
+      id: "deny",
       type: "prompt",
-      message: `/pi-bash-approve-bash-e2e ${command}`,
+      message: "/pi-bash-approve-bash-e2e go mod vendor",
     });
-    expect(response).toMatchObject({
-      id: "prompt-bash-1",
-      type: "response",
-      command: "prompt",
-      success: true,
-    });
+    const denyNotify = await client.waitFor((message) => (
+      message.type === "extension_ui_request"
+      && message.method === "notify"
+      && String(message.message).includes("go mod vendor is banned")
+    ));
+    expect(String(denyNotify.message)).toContain("go mod vendor is banned");
+    await expect(readFile(denySentinel, "utf8")).rejects.toThrow();
+    expect(client.confirmRequests()).toHaveLength(0);
 
+    const askCommand = "git tag v1.0.0";
+    const askResponsePromise = client.send({
+      id: "ask",
+      type: "prompt",
+      message: `/pi-bash-approve-bash-e2e ${askCommand}`,
+    });
     const confirm = await client.waitFor(
       (message) => message.type === "extension_ui_request" && message.method === "confirm",
     );
-
     expect(confirm.title).toBe("Allow bash command?");
-    expect(String(confirm.message)).toContain(`Command:\n${command}`);
+    expect(String(confirm.message)).toContain(`Command:\n${askCommand}`);
     expect(String(confirm.message)).toContain(`Working directory:\n${effectiveRepoDir}`);
     expect(String(confirm.message)).toContain("Reason:\ngit tag");
 
@@ -129,18 +182,29 @@ test("real pi rpc emits approval confirm for protected bash ask command", async 
       id: String(confirm.id),
       confirmed: false,
     });
-
-    const notify = await client.waitFor(
-      (message) => message.type === "extension_ui_request" && message.method === "notify",
-    );
-    expect(String(notify.message)).toContain("blocked by user");
+    const askNotify = await client.waitFor((message) => (
+      message.type === "extension_ui_request"
+      && message.method === "notify"
+      && String(message.message).includes("blocked by user")
+    ));
+    await askResponsePromise;
+    expect(String(askNotify.message)).toContain("blocked by user");
+    expect(client.confirmRequests()).toHaveLength(1);
   } finally {
     await client.close();
     await rm(tempRoot, { recursive: true, force: true });
   }
-});
+}, 60_000);
 
-function startRpcPi(input: { piCommand: string; cwd: string; agentDir: string; extensions: string[] }) {
+function startRpcPi(input: {
+  piCommand: string;
+  cwd: string;
+  agentDir: string;
+  stateDir: string;
+  gitConfig: string;
+  extensions: string[];
+  env: NodeJS.ProcessEnv;
+}) {
   const child = spawn(
     input.piCommand,
     [
@@ -152,10 +216,13 @@ function startRpcPi(input: { piCommand: string; cwd: string; agentDir: string; e
     {
       cwd: input.cwd,
       stdio: ["pipe", "pipe", "pipe"],
-      env: {
-        ...process.env,
+      env: isolatedEnvironment({
+        ...input.env,
         PI_CODING_AGENT_DIR: input.agentDir,
-      },
+        XDG_STATE_HOME: input.stateDir,
+        GIT_CONFIG_GLOBAL: input.gitConfig,
+        GIT_CONFIG_NOSYSTEM: "1",
+      }),
     },
   );
 
@@ -214,7 +281,7 @@ function startRpcPi(input: { piCommand: string; cwd: string; agentDir: string; e
         const timer = setTimeout(() => {
           const index = waiters.indexOf(waiter);
           if (index !== -1) waiters.splice(index, 1);
-          reject(new Error(`Timed out waiting for RPC message. stderr: ${stderrBuffer}`));
+          reject(new Error(`Timed out waiting for RPC message. stderr: ${stderrBuffer}; seen: ${JSON.stringify(seen)}`));
         }, timeoutMs);
         const waiter = {
           predicate,
@@ -230,6 +297,11 @@ function startRpcPi(input: { piCommand: string; cwd: string; agentDir: string; e
         waiters.push(waiter);
       });
     },
+    confirmRequests() {
+      return seen.filter((message) => (
+        message.type === "extension_ui_request" && message.method === "confirm"
+      ));
+    },
     async close() {
       if (child.exitCode === null && child.signalCode === null) {
         child.stdin.end();
@@ -240,7 +312,17 @@ function startRpcPi(input: { piCommand: string; cwd: string; agentDir: string; e
   };
 }
 
-function findPiCommand(): string | undefined {
+function isolatedEnvironment(overrides: NodeJS.ProcessEnv = {}) {
+  const environment = { ...process.env };
+  for (const name of Object.keys(environment)) {
+    if (name.startsWith("GIT_")) {
+      delete environment[name];
+    }
+  }
+  return { ...environment, ...overrides };
+}
+
+function findPiCommand() {
   if (process.env.PI_BIN) {
     return process.env.PI_BIN;
   }
@@ -251,8 +333,17 @@ function findPiCommand(): string | undefined {
   return "pi";
 }
 
-async function run(command: string, args: string[], cwd: string) {
-  const child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+async function run(
+  command: string,
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+) {
+  const child = spawn(command, args, {
+    cwd,
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   let stderr = "";
   child.stderr.on("data", (chunk) => {
     stderr += String(chunk);

@@ -144,7 +144,7 @@ test("allows protected tool calls when the runtime returns allow", async () => {
   expect(result).toBeUndefined();
 });
 
-test("prompts on noop and blocks when the user rejects", async () => {
+test("allows noop decisions with UI without prompting", async () => {
   const prompts: string[] = [];
   const handler = createProtectedToolCallHandler(
     async () => ({ config: {}, runtimePath: "/runtime" }),
@@ -173,14 +173,11 @@ test("prompts on noop and blocks when the user rejects", async () => {
     },
   );
 
-  expect(prompts).toEqual(["Allow out-of-bounds tool access?"]);
-  expect(result).toEqual({
-    block: true,
-    reason: "blocked by user",
-  });
+  expect(prompts).toEqual([]);
+  expect(result).toBeUndefined();
 });
 
-test("blocks noop decisions without UI", async () => {
+test("allows noop decisions without UI", async () => {
   const handler = createProtectedToolCallHandler(
     async () => ({ config: {}, runtimePath: "/runtime" }),
     async () => ({
@@ -200,8 +197,108 @@ test("blocks noop decisions without UI", async () => {
     },
   );
 
-  expect(result).toEqual({
-    block: true,
-    reason: "outside repo",
-  });
+  expect(result).toBeUndefined();
+});
+
+test("prompts on ask and blocks when the user rejects", async () => {
+  const prompts: string[] = [];
+  const handler = createProtectedToolCallHandler(
+    async () => ({ config: {}, runtimePath: "/runtime" }),
+    async () => ({
+      version: 1,
+      kind: "decision",
+      tool: "bash",
+      decision: "ask",
+      reason: "unknown project command",
+    }),
+  );
+
+  const result = await handler(
+    {
+      type: "tool_call",
+      toolCallId: "1",
+      toolName: "bash",
+      input: { command: "scripts/project-task --check" },
+    },
+    {
+      ...baseCtx,
+      ui: {
+        confirm: async (title) => {
+          prompts.push(title);
+          return false;
+        },
+      },
+    },
+  );
+
+  expect(prompts).toEqual(["Allow bash command?"]);
+  expect(result).toEqual({ block: true, reason: "blocked by user" });
+});
+
+test("blocks ask decisions without UI", async () => {
+  const handler = createProtectedToolCallHandler(
+    async () => ({ config: {}, runtimePath: "/runtime" }),
+    async () => ({
+      version: 1,
+      kind: "decision",
+      tool: "bash",
+      decision: "ask",
+      reason: "unknown project command",
+    }),
+  );
+
+  const result = await handler(
+    {
+      type: "tool_call",
+      toolCallId: "1",
+      toolName: "bash",
+      input: { command: "scripts/project-task --check" },
+    },
+    { cwd: "/repo", hasUI: false },
+  );
+
+  expect(result).toEqual({ block: true, reason: "unknown project command" });
+});
+
+test("blocks explicit deny decisions", async () => {
+  const handler = createProtectedToolCallHandler(
+    async () => ({ config: {}, runtimePath: "/runtime" }),
+    async () => ({
+      version: 1,
+      kind: "decision",
+      tool: "bash",
+      decision: "deny",
+      reason: "blocked test operation",
+    }),
+  );
+
+  const result = await handler(
+    {
+      type: "tool_call",
+      toolCallId: "1",
+      toolName: "bash",
+      input: { command: "test-operation --blocked" },
+    },
+    baseCtx,
+  );
+
+  expect(result).toEqual({ block: true, reason: "blocked test operation" });
+});
+
+test("blocks runtime error outputs", async () => {
+  const handler = createProtectedToolCallHandler(
+    async () => ({ config: {}, runtimePath: "/runtime" }),
+    async () => ({
+      version: 1,
+      kind: "error",
+      error: { code: "internal-error", message: "runtime failed" },
+    }),
+  );
+
+  const result = await handler(
+    { type: "tool_call", toolCallId: "1", toolName: "read", input: { path: "README.md" } },
+    baseCtx,
+  );
+
+  expect(result).toEqual({ block: true, reason: "runtime failed" });
 });
